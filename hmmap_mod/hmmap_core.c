@@ -312,13 +312,12 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	ClearPageDirty(page_in);
 	unlock_page(page_in);
 
+out:
 	if (insert_info->out_pages) {
 		up(&udev->cache_sem);
 		UDEBUG("Up cache sem clean evict list\n");
 	}
 
-
-out:
 	up_read(&udev->rw_sem);
 	UDEBUG("Up read rw sem\n");
 	kfree(insert_info);
