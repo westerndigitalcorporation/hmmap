@@ -16,8 +16,10 @@
 struct access_thread_info {
 	pthread_t tid;
 	unsigned int iters;
-	char *address;
-	size_t device_size;
+	char *s_address;
+	size_t s_device_size;
+	char *r_address;
+	size_t r_device_size;
 	unsigned long bytes_to_read;
 	bool rand;
 	bool fault_info;

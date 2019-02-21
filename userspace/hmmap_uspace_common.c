@@ -19,18 +19,15 @@
 
 #include "hmmap_uspace_common.h"
 
-static unsigned long xor_shift_seed[2] = {1024,256};
-
-
-unsigned long xor_random_num(void)
+unsigned long xor_random_num(unsigned long *xor_shift_seed)
 {
 	unsigned long x = xor_shift_seed[0];
 	unsigned long const y = xor_shift_seed[1];
 
 	xor_shift_seed[0] = y;
-    x ^= x << 23; // a
-    xor_shift_seed[1] = x ^ y ^ (x >> 17) ^ (y >> 26); // b, c
-    return xor_shift_seed[1] + y;	
+	x ^= x << 23; // a
+	xor_shift_seed[1] = x ^ y ^ (x >> 17) ^ (y >> 26); // b, c
+	return xor_shift_seed[1] + y;
 }
 
 void print_time_double(double time)
@@ -63,13 +60,11 @@ double calculate_time_diff(struct timespec start, struct timespec end,
 void random_init()
 {
 	srand(time(NULL));
-	xor_shift_seed[0] = rand();
-	xor_shift_seed[1] = rand();
 }
 
-unsigned long random_ulong(unsigned long range)
+unsigned long random_ulong(unsigned long *xor_shift_seed, unsigned long range)
 {
-	return xor_random_num() % range;
+	return xor_random_num(xor_shift_seed) % range;
 }
 
 void output_fault(void)
@@ -93,10 +88,14 @@ double random_read(char *address, size_t device_size,
 	unsigned long num_entries = (device_size / sizeof(unsigned long));
 	size_t ulongsz = sizeof(unsigned long);
 	struct timespec start,end;
-	
+	unsigned long xor_shift_seed[2];
+
+	xor_shift_seed[0] = rand();
+	xor_shift_seed[1] = rand();
+
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	while (bytes_read < bytes_to_read) {
-		offset = random_ulong(num_entries); 
+		offset = random_ulong(xor_shift_seed, num_entries);
 		volatile unsigned long *cur_long = (unsigned long *)address + offset; 
 		xor_shift_seed[0] ^= *cur_long;
 		/*if ( *cur_long != offset + (unsigned long)seed) {
@@ -153,22 +152,24 @@ void *access_thread_work(void *args)
 	unsigned int iters = t_args->iters;
 	bool rand = t_args->rand;
 	bool fault_info = t_args->fault_info;
-	char *address = t_args->address;
-	size_t device_size = t_args->device_size;
+	char *s_address = t_args->s_address;
+	char *r_address = t_args->r_address;
+	size_t s_device_size = t_args->s_device_size;
+	size_t r_device_size = t_args->r_device_size;
 	unsigned long bytes_to_read = t_args->bytes_to_read;
 	unsigned int iter_count;
 	double *time = t_args->rw_times;
 
 	for (iter_count = 0; iter_count < iters; iter_count++) {
-		*(time++) = access_buffer(address,device_size, 0, true);
+		*(time++) = access_buffer(s_address,s_device_size, 0, true);
 		if (fault_info)
 			output_fault();
 
 		if (rand) {
-			*(time++) = random_read(address, device_size,
+			*(time++) = random_read(r_address, r_device_size,
 						bytes_to_read, 0);
 		} else {
-			*(time++) = access_buffer(address, device_size, 0,
+			*(time++) = access_buffer(s_address, s_device_size, 0,
 						  false);
 		}
 
@@ -221,9 +222,14 @@ void run_threads(char *addr, size_t dev_size, unsigned long bytes_to_read,
 	}
 
 	for (cur_thread = 0; cur_thread < num_threads; cur_thread++) {
-		tinfo[cur_thread].address = addr + ((dev_size / num_threads)
-						    * cur_thread);
-		tinfo[cur_thread].device_size = dev_size / num_threads;
+		/* Random case let all threads touch any page on the dev */
+		tinfo[cur_thread].r_address = addr;
+		tinfo[cur_thread].r_device_size = dev_size;
+		/* Sequential case separate all the threads */
+		tinfo[cur_thread].s_address = addr + ((dev_size / num_threads)
+						      * cur_thread);
+		tinfo[cur_thread].s_device_size = dev_size / num_threads;
+
 		tinfo[cur_thread].bytes_to_read = bytes_to_read / num_threads;
 		tinfo[cur_thread].rand = rand;
 		tinfo[cur_thread].iters = (unsigned int)iters;
