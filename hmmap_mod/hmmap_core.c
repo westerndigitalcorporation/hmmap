@@ -302,7 +302,9 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	}
 
 	udev->cache_manager->insert_page(page_in);
-	ret = vm_insert_page(vma, vmf->address, page_in);
+	while ((ret = vm_insert_page(vma, vmf->address, page_in)) == -EBUSY)
+		pte_clear(vma->vm_mm, vmf->address, vmf->pte);
+
 	if (ret) {
 		UINFO("Insert page fails:%d,addr:%lu\n", ret, vmf->address);
 		BUG();
