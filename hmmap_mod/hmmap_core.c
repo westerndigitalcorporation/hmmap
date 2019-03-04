@@ -225,6 +225,8 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	struct address_space *as = vma->vm_file->f_mapping;
 	bool race = false;
 	unsigned long flags;
+	spinlock_t *ptl;
+	pte_t *pte;
 	XA_STATE(xas, &as->i_pages, off);
 
 	UDEBUG("Entering hmmap handle fault\n");
@@ -286,6 +288,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		atomic_inc(&udev->cache_pages);
 		up(&udev->cache_sem);
 		UDEBUG("Up udev cache sem race\n");
+		ret = VM_FAULT_NOPAGE;
 		wait_on_page_locked(page);
 		goto out;
 	}
@@ -301,18 +304,32 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		}
 	}
 
-	udev->cache_manager->insert_page(page_in);
-	while ((ret = vm_insert_page(vma, vmf->address, page_in)) == -EBUSY)
-		pte_clear(vma->vm_mm, vmf->address, vmf->pte);
+	ret = vm_insert_page(vma, vmf->address, page_in);
+	while (ret == -EBUSY) {
+		ptl = pte_lockptr(vma->vm_mm, vmf->pmd);
+		spin_lock(ptl);
+		pte = pte_offset_map(vmf->pmd, vmf->address);
+		if (pte)
+			pte_clear(vma->vm_mm, vmf->address, pte);
+
+		spin_unlock(ptl);
+		mmu_notifier_invalidate_range_start(vma->vm_mm, vmf->address,
+						    vmf->address + PAGE_SIZE);
+		ret = vm_insert_page(vma, vmf->address, page_in);
+		mmu_notifier_invalidate_range_end(vma->vm_mm, vmf->address,
+						  vmf->address + PAGE_SIZE);
+	}
 
 	if (ret) {
 		UINFO("Insert page fails:%d,addr:%lu\n", ret, vmf->address);
 		BUG();
 	}
 
+	udev->cache_manager->insert_page(page_in);
 	page_in->index = off;
 	ClearPageDirty(page_in);
 	unlock_page(page_in);
+	ret = VM_FAULT_NOPAGE;
 
 out:
 	if (insert_info->out_pages) {
@@ -324,7 +341,7 @@ out:
 	UDEBUG("Up read rw sem\n");
 	kfree(insert_info);
 
-	return VM_FAULT_NOPAGE;
+	return ret;
 }
 
 vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
@@ -335,11 +352,16 @@ vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 
 	/*direct mapping ask the backend for the pfn */
 	dev_pfn = udev->backend->get_pfn(off);
-	if (udev->wrprotect)
+	if (udev->wrprotect) {
+		/* Write during write protect go straight to cache */
+		if (vmf->flags & FAULT_FLAG_WRITE)
+			return hmmap_handle_fault(off, vmf, udev);
+
 		pgprot = PAGE_READONLY;
-	else
+	} else
 		pgprot = PAGE_SHARED;
 
+	UDEBUG("Dax insert at off %lu\n", off);
 	return vmf_insert_pfn_prot(vmf->vma, vmf->address,
 				   pfn_t_to_pfn(dev_pfn), pgprot);
 }
@@ -371,8 +393,6 @@ vm_fault_t hmmap_vm_pfn_mkwrite(struct vm_fault *vmf)
 
 	vma_address = vma->vm_start + (off - (vma->vm_pgoff << PAGE_SHIFT));
 	UDEBUG("Write Fault at addr:%lu,off:%lu\n", vmf->address, off);
-	/* Clear the pte first */
-	pte_clear(vma->vm_mm, vmf->address, vmf->pte);
 	ret = hmmap_handle_fault(off, vmf, udev);
 
 	return ret;
