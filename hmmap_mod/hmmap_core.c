@@ -228,6 +228,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	spinlock_t *ptl;
 	pte_t *pte;
 	XA_STATE(xas, &as->i_pages, off);
+	struct mmu_notifier_range range;
 
 	UDEBUG("Entering hmmap handle fault\n");
 	UDEBUG("Down sem cache sem attempt\n");
@@ -313,11 +314,13 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 			pte_clear(vma->vm_mm, vmf->address, pte);
 
 		spin_unlock(ptl);
-		mmu_notifier_invalidate_range_start(vma->vm_mm, vmf->address,
-						    vmf->address + PAGE_SIZE);
+		range.mm = vma->vm_mm;
+		range.start = vmf->address;
+		range.end = vmf->address + PAGE_SIZE;
+		range.blockable = true;
+		mmu_notifier_invalidate_range_start(&range);
 		ret = vm_insert_page(vma, vmf->address, page_in);
-		mmu_notifier_invalidate_range_end(vma->vm_mm, vmf->address,
-						  vmf->address + PAGE_SIZE);
+		mmu_notifier_invalidate_range_end(&range);
 	}
 
 	if (ret) {
