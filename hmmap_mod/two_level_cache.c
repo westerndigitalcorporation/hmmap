@@ -222,8 +222,8 @@ void two_level_recharge_inactive(struct vm_area_struct *vma,
 		       page, page->index, &page->lru);
 		UDEBUG("VMA: %p\n", vma);
 
-		if (follow_pte_pmd(vma->vm_mm, address, NULL, NULL, &ptep,
-				   &pmdp, &ptl))
+		if (follow_pte_pmd(vma->vm_mm, address, NULL, &ptep, &pmdp,
+				   &ptl))
 		{
 			UDEBUG("unable to find the ptep for address %lu\n",
 			       address);
@@ -273,8 +273,7 @@ void two_level_update_inactive(struct vm_area_struct *vma)
 	list_del_init(&page->lru);
 	/* Dev offsets should always be on page boundaries */
 	address = vma->vm_start + (page->index - (vma->vm_pgoff << PAGE_SHIFT));
-	if (follow_pte_pmd(vma->vm_mm, address, NULL, NULL, &ptep, &pmdp,
-			   &ptl))
+	if (follow_pte_pmd(vma->vm_mm, address, NULL, &ptep, &pmdp, &ptl))
 	{
 		/* Race problem here if we look for the pte but the thread */
 		/* that has inserted the page has not yet inserted the pte */
