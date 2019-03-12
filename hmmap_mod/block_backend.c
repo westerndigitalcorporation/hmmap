@@ -138,7 +138,8 @@ int hmmap_block_submit_bio(void *cache_address, unsigned long offset, int op,
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			if (!READ_ONCE(bio->bi_private))
 				break;
-			if (!blk_poll(bdev_get_queue(block_info.bdev), qc))
+			if (!blk_poll(bdev_get_queue(block_info.bdev), qc,
+				      true))
 				io_schedule();
 		}
 		__set_current_state(TASK_RUNNING);
