@@ -43,7 +43,7 @@ int hmmap_block_init(unsigned long size, u32 page_size, struct hmmap_dev *dev)
 	}
 
 	bdev = blkdev_get_by_path(dev->path, mode, dev);
-	if (!bdev) {
+	if (IS_ERR(bdev)) {
 		ret = PTR_ERR(bdev);
 		UINFO("ERROR: %d, Blkdev get by path: %s\n", ret, dev->path);
 		goto out;
