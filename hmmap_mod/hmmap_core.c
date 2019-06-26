@@ -317,7 +317,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		range.mm = vma->vm_mm;
 		range.start = vmf->address;
 		range.end = vmf->address + PAGE_SIZE;
-		range.blockable = true;
+		range.flags |= MMU_NOTIFIER_RANGE_BLOCKABLE;
 		mmu_notifier_invalidate_range_start(&range);
 		ret = vm_insert_page(vma, vmf->address, page_in);
 		mmu_notifier_invalidate_range_end(&range);
@@ -369,7 +369,7 @@ vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 				   pfn_t_to_pfn(dev_pfn), pgprot);
 }
 
-static int hmmap_vm_fault(struct vm_fault *vmf)
+vm_fault_t hmmap_vm_fault(struct vm_fault *vmf)
 {
 	unsigned long off = vmf->pgoff << PAGE_SHIFT;
 	struct vm_area_struct *vma = vmf->vma;
