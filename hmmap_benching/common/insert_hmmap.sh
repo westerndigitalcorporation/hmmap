@@ -25,7 +25,7 @@ cp *.ko /lib/modules/`uname -r`/
 depmod -a
 modprobe hmmap device_size=${DEVICE_SIZE} cache_size=${CACHE_SIZE} \
 backend_device="${BACKEND_DEVICE}" backend_path="${BACKEND_PATH}"
-DEV_NODE=`dmesg | grep "hmmap: added device" | tail -n 1 | awk '{print $6}' | \
+DEV_NODE=`dmesg | grep "hmmap: added device" | tail -n 1 | awk '{print $NF}' | \
 awk -F ":" '{print $1}'`
 mknod /dev/hmmap c ${DEV_NODE} 0
 popd
