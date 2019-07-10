@@ -15,7 +15,7 @@ handles the IO to/from the cache.
 
 ### I.2. Kernel Version
 
-hmmap is currently based on the Linux kernel version 5.0.
+hmmap is currently based on the Linux kernel version 5.2.
 
 ### I.3. License
 
