@@ -106,5 +106,6 @@ struct hmmap_cache_manager *hmmap_find_cache_manager(const char *name);
 struct hmmap_backend *hmmap_find_backend(const char *name);
 
 void hmmap_release_page(struct hmmap_dev *udev, struct page *page);
+void hmmap_clear_xamap(struct page *page);
 
 #endif
