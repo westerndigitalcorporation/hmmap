@@ -227,7 +227,7 @@ void two_level_recharge_inactive(struct vm_area_struct *vma,
 		{
 			UDEBUG("unable to find the ptep for address %lu\n",
 			       address);
-			WARN(1, "vma flags:%lu\n", vma->vm_flags);
+			list_add_tail(&page->lru, dest);
 			continue;
 		}
 
