@@ -135,13 +135,10 @@ static const struct attribute_group hmmap_attr_group = {
 void hmmap_fault_range(struct vm_area_struct *vma, unsigned long offset)
 {
 	struct address_space *as = vma->vm_file->f_mapping;
-	XA_STATE(xas, &as->i_pages, offset);
 	/* Remove vma mapping for given range, TODO be sure to remember
 	 the page size of the cache */
 	UDEBUG("Faulting out addr:%lu,as:%p\n", offset, as);
 	unmap_mapping_range(as, offset, PAGE_SIZE, 1);
-	/* We are guarantted to have only one thread running here */
-	xas_store(&xas, NULL);
 	return;
 }
 
@@ -158,6 +155,9 @@ void hmmap_find_dirty_pages(struct vm_area_struct *vma,
 	/* This is wasteful clean me up, only need space for dirty pages */
 	while (page_idx < info->num_pages) {
 		page = info->out_pages[page_idx];
+		if (page_idx || pte_gone)
+			lock_page(page);
+		page->mapping = vma->vm_file->f_mapping;
 		hmmap_fault_range(vma, page->index);
 		/* Check if the page is dirty */
 		if (PageDirty(page)) {
@@ -170,6 +170,7 @@ void hmmap_find_dirty_pages(struct vm_area_struct *vma,
 		} else {
 			/* Don't signal that a page is free until all the */
 			/* fault range calls have completed               */
+			hmmap_clear_xamap(page);
 			if (page_idx || pte_gone)
 				list_add_tail(&page->lru, &clean_pages);
 
@@ -181,6 +182,7 @@ void hmmap_find_dirty_pages(struct vm_area_struct *vma,
 	while (!list_empty(&clean_pages)) {
 		page = list_first_entry(&clean_pages, struct page, lru);
 		list_del_init(&page->lru);
+		unlock_page(page);
 		udev->cache_manager->release_page(page);
 		up(&udev->cache_sem);
 		UDEBUG("Up udev cache sem clean page\n");
@@ -267,6 +269,8 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	xas_lock_irqsave(&xas, flags);
 	page = xas_store(&xas, page_in);
 	xas_unlock_irqrestore(&xas, flags);
+	UDEBUG("Attempting to store page %p at offset %lu in as %p\n", page_in,
+	       off, as);
 	/* Something existed so no need to do IO */
 	if (page) {
 		race = true;
