@@ -8,7 +8,7 @@
 #
 
 # I could be more intelligent and find the backends and caches currently loaded
-BACKENDS=( "hmmap_block_backend" "hmmap_mem_backend hmmap_dax_backend" )
+BACKENDS=( "hmmap_block_backend" "hmmap_mem_backend hmmap_dax_backend" "hmmap_nvme_mem_backend")
 CACHES=( "hmmap_two_level_cache" "hmmap_dimmap_cache" "hmmap_dax_cache" )
 
 rmmod hmmap

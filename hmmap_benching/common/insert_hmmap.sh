@@ -7,9 +7,10 @@
 # Copyright (c) 2019 Western Digital Corporation or its affiliates
 #
 
-USAGE="insert_hmmap.sh device_size cache_size backend_device backend_path"
+USAGE="insert_hmmap.sh device_size cache_size backend_device backend_path\
+ pcie_slot"
 
-if [ $# -ne 4 ]; then
+if [ $# -ne 5 ]; then
 	echo $USAGE
 	exit
 fi
@@ -24,7 +25,8 @@ cd ../../hmmap_mod/
 cp *.ko /lib/modules/`uname -r`/
 depmod -a
 modprobe hmmap device_size=${DEVICE_SIZE} cache_size=${CACHE_SIZE} \
-backend_device="${BACKEND_DEVICE}" backend_path="${BACKEND_PATH}"
+backend_device="${BACKEND_DEVICE}" backend_path="${BACKEND_PATH}" \
+pcie_slot=${5}
 DEV_NODE=`dmesg | grep "hmmap: added device" | tail -n 1 | awk '{print $NF}' | \
 awk -F ":" '{print $1}'`
 mknod /dev/hmmap c ${DEV_NODE} 0
