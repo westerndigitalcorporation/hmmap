@@ -16,114 +16,45 @@
 #include "pcie_mem_backend.h"
 #include "hmmap.h"
 
-struct pcie_mem_backend_info pcie_info = {};
-
-
-int pcie_mem_extract_substr(char **str, unsigned int *val, bool is_signed)
-{
-	char *sub_str;
-	const char *sep = ":";
-	int ret = 0;
-
-	if (str) {
-		sub_str = strsep(&(*str), sep);
-		if (sub_str && is_signed)
-			ret = kstrtoint(sub_str, 0, (int *)val);
-		else if (sub_str && !is_signed)
-			ret = kstrtouint(sub_str, 0, val);
-		else
-			return -EINVAL;
-
-		if (ret)
-			return ret;
-	} else
-		return -EINVAL;
-
-	return ret;
-}
-
-int pcie_mem_extract_bus_from_path(const char *path)
-{
-	char *tmp_str;
-	char tmp_buf[MAX_ID_SIZE];
-	int ret = 0;
-
-	memcpy(tmp_buf, path, MAX_ID_SIZE);
-	tmp_str = tmp_buf;
-
-	/* First arg is the int */
-	ret = pcie_mem_extract_substr(&tmp_str, &pcie_info.domain, true);
-	if (ret) {
-		UINFO("Error extracting domain from %s\n", path);
-		goto out;
-	}
-
-	ret = pcie_mem_extract_substr(&tmp_str, &pcie_info.bus, false);
-	if (ret) {
-		UINFO("Error extracting bus from %s\n", path);
-		goto out;
-	}
-
-	ret = pcie_mem_extract_substr(&tmp_str, &pcie_info.dev_num, false);
-	if (ret) {
-		UINFO("Error extracting dev_num from %s\n", path);
-		goto out;
-	}
-
-	ret = pcie_mem_extract_substr(&tmp_str, &pcie_info.func, false);
-	if (ret) {
-		UINFO("Error extracting function from %s\n", path);
-		goto out;
-	}
-
-	ret = pcie_mem_extract_substr(&tmp_str, &pcie_info.res_num, false);
-	if (ret) {
-		UINFO("Error extracting resource from %s\n", path);
-		goto out;
-	}
-
-	UINFO("PCIE MEM BACKEND FOUND DEV DOM:BUS:DEV:FN:RES %d:%u:%u:%u:%u\n",
-	      pcie_info.domain, pcie_info.bus, pcie_info.dev_num,
-	      pcie_info.func, pcie_info.res_num);
-out:
-	return ret;
-}
+struct pcie_mem_backend pcie_membe = {};
 
 int pcie_mem_init(unsigned long size, unsigned int page_size,
-		 struct hmmap_dev *dev)
+		  struct hmmap_dev *dev)
 {
 	unsigned int dev_fn;
 	resource_size_t res_size;
 	int ret = 0;
 	struct resource *res;
+	struct hmmap_pcie_info *pcie_info = &pcie_membe.info;
 
-	if (!dev->path) {
+	if (!dev->pcie_slot) {
 		UINFO("ERROR: PCIE_MEM_BACKEND DOM:BUS:DEV:FN:RES missing\n");
 		ret = -ENXIO;
 		goto out;
 	}
 
-	ret = pcie_mem_extract_bus_from_path(dev->path);
+	ret = hmmap_extract_bus_from_path(dev->pcie_slot, pcie_info);
 	if (ret) {
 		UINFO("ERROR: PCIE_MEM_BACKEND PARSE DOM:BUS:DEV:FN:RES\n");
 		ret = -ENXIO;
 		goto out;
 	}
 
-	dev_fn = PCI_DEVFN(pcie_info.dev_num, pcie_info.func);
-	pcie_info.pcie_dev = pci_get_domain_bus_and_slot(pcie_info.domain,
-						       pcie_info.bus, dev_fn);
+	dev_fn = PCI_DEVFN(pcie_info->dev_num, pcie_info->func);
+	pcie_info->pcie_dev = pci_get_domain_bus_and_slot(pcie_info->domain,
+							  pcie_info->bus,
+							  dev_fn);
 
-	if (!pcie_info.pcie_dev) {
+	if (!pcie_info->pcie_dev) {
 		UINFO("ERROR: PCIE_MEM_BACKEND GET PCI DEV\n");
 		ret = -ENXIO;
 		goto out;
 	}
 
-	res = &pcie_info.pcie_dev->resource[pcie_info.res_num];
+	res = &pcie_info->pcie_dev->resource[pcie_info->res_num];
 	if (!(res->flags & IORESOURCE_MEM)) {
 		UINFO("ERROR: PCIE_MEM_BACKEND resource %u NOT MEM\n",
-		      pcie_info.res_num);
+		      pcie_info->res_num);
 		ret = -ENXIO;
 		goto out_pci_put;
 	}
@@ -135,27 +66,28 @@ int pcie_mem_init(unsigned long size, unsigned int page_size,
 		goto out_pci_put;
 	}
 
-	pcie_info.mem = ioremap_wc(res->start, res_size);
-	if (!pcie_info.mem) {
+	pcie_membe.mem = ioremap_wc(res->start, res_size);
+	if (!pcie_membe.mem) {
 		UINFO("ERROR: PCIE_MEM_BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
 		goto out_pci_put;
 	}
 
-	pcie_info.size = res_size;
-	pcie_info.page_size = page_size;
-	pcie_info.res = res;
+	pcie_membe.size = res_size;
+	pcie_membe.page_size = page_size;
+	pcie_membe.dev = dev;
+	pcie_info->res = res;
 	goto out;
 
 out_pci_put:
-	pci_dev_put(pcie_info.pcie_dev);
+	pci_dev_put(pcie_info->pcie_dev);
 out:
 	return ret;
 }
 
 void *pcie_mem(unsigned long off)
 {
-	return pcie_info.mem + off;
+	return pcie_membe.mem + off;
 }
 
 void pcie_mem_fill_cache_avx2(void *cache_addr, unsigned long off)
@@ -165,7 +97,7 @@ void pcie_mem_fill_cache_avx2(void *cache_addr, unsigned long off)
 	char *cache_ptr = (char *)cache_addr;
 
 	kernel_fpu_begin();
-	for (pos = 0; pos < pcie_info.page_size; pos += CHAR_IN_AVX2) {
+	for (pos = 0; pos < pcie_membe.page_size; pos += CHAR_IN_AVX2) {
 		asm volatile("vmovntdqa %0,%%ymm0" : : "m" (dev_ptr[pos]));
 		asm volatile("vmovdqa %%ymm0,%0" : "=m" (cache_ptr[pos]));
 	}
@@ -178,7 +110,7 @@ int pcie_mem_fill_cache(void *cache_address, unsigned long off)
 		pcie_mem_fill_cache_avx2(cache_address, off);
 	else
 		memcpy_fromio(cache_address, pcie_mem(off),
-			      pcie_info.page_size);
+			      pcie_membe.page_size);
 	return 0;
 }
 
@@ -194,7 +126,7 @@ int pcie_mem_flush_pages(struct hmmap_dev *udev)
 		off = page->index;
 		cache_address = (void *)page->private;
 		memcpy_toio(pcie_mem(off), cache_address,
-			    pcie_info.page_size);
+			    pcie_membe.page_size);
 
 		list_del_init(&page->lru);
 		hmmap_release_page(udev, page);
@@ -205,8 +137,8 @@ int pcie_mem_flush_pages(struct hmmap_dev *udev)
 
 void pcie_mem_destroy(void)
 {
-	iounmap(pcie_info.mem);
-	pci_dev_put(pcie_info.pcie_dev);
+	iounmap(pcie_membe.mem);
+	pci_dev_put(pcie_membe.info.pcie_dev);
 }
 
 static struct hmmap_backend pcie_mem_backend = {

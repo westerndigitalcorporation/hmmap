@@ -44,6 +44,76 @@ void hmmap_release_page(struct hmmap_dev *udev, struct page *page)
 }
 EXPORT_SYMBOL(hmmap_release_page);
 
+int hmmap_extract_substr(char **str, unsigned int *val, bool is_signed)
+{
+	char *sub_str;
+	const char *sep = ":";
+	int ret = 0;
+
+	if (str) {
+		sub_str = strsep(&(*str), sep);
+		if (sub_str && is_signed)
+			ret = kstrtoint(sub_str, 0, (int *)val);
+		else if (sub_str && !is_signed)
+			ret = kstrtouint(sub_str, 0, val);
+		else
+			return -EINVAL;
+
+		if (ret)
+			return ret;
+	} else
+		return -EINVAL;
+
+	return ret;
+}
+
+int hmmap_extract_bus_from_path(const char *path, struct hmmap_pcie_info *info)
+{
+	char *tmp_str;
+	char tmp_buf[MAX_ID_SIZE];
+	int ret = 0;
+
+	memcpy(tmp_buf, path, MAX_ID_SIZE);
+	tmp_str = tmp_buf;
+
+	/* First arg is the int */
+	ret = hmmap_extract_substr(&tmp_str, &info->domain, true);
+	if (ret) {
+		UINFO("Error extracting domain from %s\n", path);
+		goto out;
+	}
+
+	ret = hmmap_extract_substr(&tmp_str, &info->bus, false);
+	if (ret) {
+		UINFO("Error extracting bus from %s\n", path);
+		goto out;
+	}
+
+	ret = hmmap_extract_substr(&tmp_str, &info->dev_num, false);
+	if (ret) {
+		UINFO("Error extracting dev_num from %s\n", path);
+		goto out;
+	}
+
+	ret = hmmap_extract_substr(&tmp_str, &info->func, false);
+	if (ret) {
+		UINFO("Error extracting function from %s\n", path);
+		goto out;
+	}
+
+	ret = hmmap_extract_substr(&tmp_str, &info->res_num, false);
+	if (ret) {
+		UINFO("Error extracting resource from %s\n", path);
+		goto out;
+	}
+
+	UINFO("HMMAP BACKEND FOUND DEV DOM:BUS:DEV:FN:RES %d:%u:%u:%u:%u\n",
+	      info->domain, info->bus, info->dev_num, info->func,
+	      info->res_num);
+out:
+	return ret;
+}
+EXPORT_SYMBOL(hmmap_extract_bus_from_path);
 
 MODULE_AUTHOR("Adam Manzanares");
 MODULE_LICENSE("GPL");

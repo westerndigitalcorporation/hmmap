@@ -20,6 +20,7 @@
 #define DEVICE_SIZE	2097152 /* 2MiB */
 #define CACHE_SIZE	1048576 /* 1MiB */
 #define MIN_CACHE_SIZE 8192 /* Need to fix errors when using one page */
+#define MAX_ID_SIZE 128
 //#define HMMAP_DEBUG
 //#define HMMAP_TRACE
 
@@ -65,6 +66,7 @@ struct hmmap_dev {
 	const struct hmmap_backend *backend;
 	const struct hmmap_cache_manager *cache_manager;
 	const char *path; /* Only used if we have a backing device */
+	const char *pcie_slot; /* Used to get the memory on a bar */
 	bool dax;
 	bool wrprotect;
 	struct semaphore cache_sem;
@@ -98,6 +100,16 @@ struct hmmap_backend {
 	struct list_head list;
 };
 
+struct hmmap_pcie_info {
+	int domain;
+	unsigned int bus;
+	unsigned int dev_num;
+	unsigned int func;
+	unsigned int res_num;
+	struct pci_dev *pcie_dev;
+	struct resource *res;
+};
+
 int hmmap_register_cache_manager(struct hmmap_cache_manager *cm);
 int hmmap_register_backend(struct hmmap_backend *backend);
 void hmmap_unregister_cache_manager(struct hmmap_cache_manager *cm);
@@ -107,5 +119,6 @@ struct hmmap_backend *hmmap_find_backend(const char *name);
 
 void hmmap_release_page(struct hmmap_dev *udev, struct page *page);
 void hmmap_clear_xamap(struct page *page);
+int hmmap_extract_bus_from_path(const char *path, struct hmmap_pcie_info *info);
 
 #endif

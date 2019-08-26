@@ -37,6 +37,7 @@ unsigned int device_pages = 0;
 static char *caching_policy = "two_level_cache";
 static char *backend_device = "mem_backend";
 static char *backend_path = "";
+static char *pcie_slot = "";
 struct hmmap_extent extent_list;
 struct hmmap_dev *hmmap_devices;
 
@@ -47,6 +48,7 @@ module_param(device_delay, ulong, 0);
 module_param(caching_policy, charp, 0);
 module_param(backend_device, charp, 0);
 module_param(backend_path, charp, 0);
+module_param(pcie_slot, charp, 0);
 
 static ssize_t hmmap_kobj_delay_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
@@ -671,6 +673,7 @@ static int __init hmmap_module_init(void)
 
 	for (i = 0; i < hmmap_devs; ++i) {
 		hmmap_dev->path = backend_path;
+		hmmap_dev->pcie_slot = pcie_slot;
 		sema_init(&hmmap_dev->cache_sem, cache_pages + 1);
 		init_rwsem(&hmmap_dev->rw_sem);
 		atomic_set(&hmmap_dev->cache_pages, cache_pages + 1);

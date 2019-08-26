@@ -10,21 +10,17 @@
 #ifndef PCIE_MEM_BACKEND_H
 #define PCIE_MEM_BACKEND_H
 
-#define MAX_ID_SIZE 128
+#include "hmmap.h"
+
 #define CHAR_IN_AVX2 32
 
-struct pcie_mem_backend_info {
+
+struct pcie_mem_backend {
 	void __iomem *mem;
 	struct hmmap_dev *dev;
 	unsigned long size;
 	unsigned int page_size;
-	int domain;
-	unsigned int bus;
-	unsigned int dev_num;
-	unsigned int func;
-	unsigned int res_num;
-	struct pci_dev *pcie_dev;
-	struct resource *res;
+	struct hmmap_pcie_info info;
 };
 
 #endif
