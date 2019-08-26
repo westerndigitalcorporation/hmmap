@@ -229,7 +229,7 @@ void hmmap_block_destroy(void)
 static struct hmmap_backend block_backend = {
 	.name = "block_backend",
 	.init = hmmap_block_init,
-	.get_pfn = NULL,
+	.get_page = NULL,
 	.fill_cache = hmmap_block_fill_cache,
 	.flush_pages = hmmap_block_flush_pages,
 	.destroy = hmmap_block_destroy,
