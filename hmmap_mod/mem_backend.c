@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/pfn_t.h>
+#include <linux/pagemap.h>
 
 #include "mem_backend.h"
 #include "hmmap.h"
@@ -38,12 +39,9 @@ void *mem_get(unsigned long offset)
 	return mem_info.mem + offset;	
 }
 
-pfn_t mem_get_pfn(unsigned long offset)
+struct page *mem_get_page(unsigned long offset)
 {
-	struct page *page = vmalloc_to_page(mem_get(offset));
-
-	return page_to_pfn_t(page);
-
+	return vmalloc_to_page(mem_get(offset));
 }
 
 int mem_fill_cache(void *cache_address, unsigned long off)
@@ -66,6 +64,7 @@ int mem_flush_pages(struct hmmap_dev *udev)
 		UDEBUG("Flushing page with index %lu\n", off);
 		memcpy(mem_get(off), cache_address, mem_info.page_size);
 		list_del_init(&page->lru);
+		unlock_page(mem_get_page(off));
 		hmmap_release_page(udev, page);
 	}
 
@@ -80,7 +79,7 @@ void mem_destroy(void)
 static struct hmmap_backend mem_backend = {
 	.name = "mem_backend",
 	.init = mem_backend_init,
-	.get_pfn = mem_get_pfn,
+	.get_page = mem_get_page,
 	.fill_cache = mem_fill_cache,
 	.flush_pages = mem_flush_pages,
 	.destroy = mem_destroy,
