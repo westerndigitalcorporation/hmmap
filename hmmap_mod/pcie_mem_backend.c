@@ -153,13 +153,6 @@ out:
 	return ret;
 }
 
-pfn_t pcie_mem_get_pfn(unsigned long offset)
-{
-	phys_addr_t phys = pcie_info.res->start + offset;
-
-	return phys_to_pfn_t(phys, PFN_DEV);
-}
-
 void *pcie_mem(unsigned long off)
 {
 	return pcie_info.mem + off;
@@ -219,7 +212,7 @@ void pcie_mem_destroy(void)
 static struct hmmap_backend pcie_mem_backend = {
 	.name = "pcie_mem_backend",
 	.init = pcie_mem_init,
-	.get_pfn = pcie_mem_get_pfn,
+	.get_page = NULL,
 	.fill_cache = pcie_mem_fill_cache,
 	.flush_pages = pcie_mem_flush_pages,
 	.destroy = pcie_mem_destroy,
