@@ -91,7 +91,7 @@ struct hmmap_backend {
 	const char *name;
 	int (*init)(unsigned long size, unsigned page_size, 
 		    struct hmmap_dev *dev);
-	pfn_t (*get_pfn)(unsigned long offset);
+	struct page *(*get_page)(unsigned long offset);
 	int (*fill_cache)(void *cache_address, unsigned long offset);
 	int (*flush_pages)(struct hmmap_dev *udev);
 	void (*destroy)(void);

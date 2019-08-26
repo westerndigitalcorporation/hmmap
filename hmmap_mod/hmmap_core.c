@@ -106,8 +106,8 @@ static ssize_t hmmap_dev_##field##_store(struct device *dev,		     \
 									     \
 	/* Iterate over the devices and set the dax capability */	     \
 	for (cur_dev = 0; cur_dev < hmmap_devs; cur_dev++) {		     \
-		/* Only set the dax capability on dev that can get_pfn */    \
-		if (hmmap_dev->backend->get_pfn)			     \
+		/* Only set the dax capability on dev that can get_page */   \
+		if (hmmap_dev->backend->get_page)			     \
 			hmmap_dev->field = temp;			     \
 									     \
 		hmmap_dev++;						     \
@@ -173,7 +173,6 @@ void hmmap_find_dirty_pages(struct vm_area_struct *vma,
 			hmmap_clear_xamap(page);
 			if (page_idx || pte_gone)
 				list_add_tail(&page->lru, &clean_pages);
-
 		}
 
 		page_idx++;
@@ -354,11 +353,17 @@ out:
 vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 				 struct hmmap_dev *udev)
 {
-	pfn_t dev_pfn;
+	struct page *page, *xa_page;
 	pgprot_t pgprot;
+	struct address_space *as = vmf->vma->vm_file->f_mapping;
+	XA_STATE(xas, &as->i_pages, off);
+	unsigned long flags;
 
-	/*direct mapping ask the backend for the pfn */
-	dev_pfn = udev->backend->get_pfn(off);
+	/*direct mapping ask the backend for the page */
+	page = udev->backend->get_page(off);
+	if (!page)
+		return VM_FAULT_OOM;
+
 	if (udev->wrprotect) {
 		/* Write during write protect go straight to cache */
 		if (vmf->flags & FAULT_FLAG_WRITE)
@@ -369,8 +374,16 @@ vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 		pgprot = PAGE_SHARED;
 
 	UDEBUG("Dax insert at off %lu\n", off);
-	return vmf_insert_pfn_prot(vmf->vma, vmf->address,
-				   pfn_t_to_pfn(dev_pfn), pgprot);
+	wait_on_page_locked(page);
+	xas_lock_irqsave(&xas, flags);
+	xa_page = xas_store(&xas, page);
+	xas_unlock_irqrestore(&xas, flags);
+	if (xa_page) {
+		wait_on_page_locked(xa_page);
+		return VM_FAULT_NOPAGE;
+	} else
+		return vmf_insert_pfn_prot(vmf->vma, vmf->address,
+					   page_to_pfn(page), pgprot);
 }
 
 vm_fault_t hmmap_vm_fault(struct vm_fault *vmf)
@@ -397,9 +410,15 @@ vm_fault_t hmmap_vm_pfn_mkwrite(struct vm_fault *vmf)
 	struct hmmap_dev *udev = (struct hmmap_dev *)vma->vm_private_data;
 	int ret;
 	unsigned long vma_address;
+	struct address_space *as = vma->vm_file->f_mapping;
+	XA_STATE(xas, &as->i_pages, off);
+	unsigned long flags;
 
 	vma_address = vma->vm_start + (off - (vma->vm_pgoff << PAGE_SHIFT));
 	UDEBUG("Write Fault at addr:%lu,off:%lu\n", vmf->address, off);
+	xas_lock_irqsave(&xas, flags);
+	xas_store(&xas, NULL);
+	xas_unlock_irqrestore(&xas, flags);
 	ret = hmmap_handle_fault(off, vmf, udev);
 
 	return ret;
@@ -434,8 +453,9 @@ void hmmap_vm_open(struct vm_area_struct *vma)
 		hmmap_handle_eviction(vma, &insert_info, udev, true);
 		up(&udev->cache_sem);
 	}
-	up_write(&udev->rw_sem);
 
+	xa_destroy(&vma->vm_file->f_mapping->i_pages);
+	up_write(&udev->rw_sem);
 	atomic_set(&udev->cache_pages, cache_pages + 1);
 	UDEBUG("Set cache pages atomic to:%u\n", cache_pages + 1);
 	sema_init(&udev->cache_sem, cache_pages + 1);
@@ -470,6 +490,7 @@ del:
 		up(&udev->cache_sem);
 	}
 
+	xa_destroy(&vma->vm_file->f_mapping->i_pages);
 	up_write(&udev->rw_sem);
 	list_del(&cur_extent->list);
 	kfree(cur_extent);
