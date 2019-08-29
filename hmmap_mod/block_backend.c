@@ -29,45 +29,21 @@ struct block_backend_info block_info = {};
 int hmmap_block_init(unsigned long size, u32 page_size, struct hmmap_dev *dev)
 {
 	int ret = 0;
-	struct block_device *bdev = NULL;
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
-
 	block_info.size = size;
 	block_info.page_size = page_size;
 	block_info.dev = dev;
 
-	if (!dev->path) {
-		UINFO("ERROR BLOCK BACKEND NO PATH SET\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
-	bdev = blkdev_get_by_path(dev->path, mode, dev);
-	if (IS_ERR(bdev)) {
-		ret = PTR_ERR(bdev);
-		UINFO("ERROR: %d, Blkdev get by path: %s\n", ret, dev->path);
-		goto out;
-	}
-
-	if (!bdev->bd_disk) {
-		UINFO("Block dev %s has no bi_disk\n", dev->path);
-		ret = -ENXIO;
-		goto out;
-	}
+	ret = hmmap_set_bdev(dev, &block_info.bdev);
+	if (ret)
+		return ret;
 
 	block_info.data_buffer = vmalloc(page_size);
 	if (!block_info.data_buffer) {
 		UINFO("BLOCK BACKEND DATA BUFFER ALLOC FAIL\n");
+		hmmap_put_bdev(block_info.bdev);
 		ret = -ENOMEM;
-		goto out_release_blkdev;
 	}
 
-	block_info.bdev = bdev;
-	goto out;
-
-out_release_blkdev:
-	blkdev_put(bdev, mode);
-out:
 	return ret;
 }
 

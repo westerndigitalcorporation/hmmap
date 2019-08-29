@@ -34,8 +34,6 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 			struct hmmap_dev *dev)
 {
 	int ret = 0;
-	struct block_device *bdev = NULL;
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
 	struct resource *res;
 	resource_size_t res_size;
 	unsigned int dev_fn;
@@ -44,11 +42,10 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 	nvme_mem_be.size = size;
 	nvme_mem_be.page_size = page_size;
 	nvme_mem_be.dev = dev;
-	if (!dev->path) {
-		UINFO("ERROR NVME MEM BACKEND NO BLOCK DEV PATH\n");
-		ret = -ENXIO;
+
+	ret = hmmap_set_bdev(dev, &nvme_mem_be.bdev);
+	if (ret)
 		goto out;
-	}
 
 	if (!dev->pcie_slot) {
 		UINFO("ERROR NVME MEM BACKEND NO PCIE SLOT\n");
@@ -56,20 +53,6 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 		goto out;
 	}
 
-	bdev = blkdev_get_by_path(dev->path, mode, dev);
-	if (IS_ERR(bdev)) {
-		ret = PTR_ERR(bdev);
-		UINFO("ERROR: %d, Blkdev get by path: %s\n", ret, dev->path);
-		goto out;
-	}
-
-	if (!bdev->bd_disk) {
-		UINFO("Block dev %s has no bi_disk\n", dev->path);
-		ret = -ENXIO;
-		goto out;
-	}
-
-	nvme_mem_be.bdev = bdev;
 	ret = hmmap_extract_bus_from_path(dev->pcie_slot, pcie_info);
 	if (ret) {
 		UINFO("ERROR: NVME MEM BACKEND PARSE DOM:BUS:DEV:FN:RES\n");
@@ -129,7 +112,7 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 out_pci_put:
 	pci_dev_put(pcie_info->pcie_dev);
 out_release_blkdev:
-	blkdev_put(bdev, mode);
+	hmmap_put_bdev(nvme_mem_be.bdev);
 out:
 	return ret;
 }
