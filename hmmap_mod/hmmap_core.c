@@ -262,25 +262,20 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		goto out;
 	}
 
-	if (!read)
-		downgrade_write(&udev->rw_sem);
-
 	page_in = insert_info->page_in;
 	/* Attempt to reserve the spot */
 	xas_lock_irqsave(&xas, flags);
-	page = xas_store(&xas, page_in);
-	xas_unlock_irqrestore(&xas, flags);
-	UDEBUG("Attempting to store page %p at offset %lu in as %p\n", page_in,
-	       off, as);
-	/* Something existed so no need to do IO */
+	page = xas_load(&xas);
 	if (page) {
 		race = true;
 		UDEBUG("RACE on a page\n");
 	} else {
 		UDEBUG("Free spot in xarray\n");
+		xas_store(&xas, page_in);
 		lock_page(page_in);
 	}
 
+	xas_unlock_irqrestore(&xas, flags);
 	/* Only hande an eviction if we need to */
 	if (insert_info->out_pages) {
 		num_pages = insert_info->num_pages;
@@ -288,6 +283,8 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		atomic_set(&udev->cache_pages, num_pages);
 	}
 
+	if (!read)
+		downgrade_write(&udev->rw_sem);
 	/* If we encountered a race, wait for winner to install pte */
 	if (race) {
 		udev->cache_manager->release_page(page_in);
