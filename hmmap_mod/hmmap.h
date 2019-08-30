@@ -121,7 +121,5 @@ struct hmmap_backend *hmmap_find_backend(const char *name);
 void hmmap_release_page(struct hmmap_dev *udev, struct page *page);
 void hmmap_clear_xamap(struct page *page);
 int hmmap_extract_bus_from_path(const char *path, struct hmmap_pcie_info *info);
-int hmmap_set_bdev(struct hmmap_dev *dev, struct block_device **bdev);
-void hmmap_put_bdev(struct block_device *bdev);
 
 #endif

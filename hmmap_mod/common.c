@@ -115,38 +115,5 @@ out:
 }
 EXPORT_SYMBOL(hmmap_extract_bus_from_path);
 
-int hmmap_set_bdev(struct hmmap_dev *dev, struct block_device **bdev)
-{
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
-
-	if (!dev->path) {
-		UINFO("ERROR HMMAP SET BDEV NO PATH SET\n");
-		return -ENXIO;
-	}
-
-	*bdev = blkdev_get_by_path(dev->path, mode, dev);
-	if (IS_ERR(*bdev)) {
-		UINFO("ERROR: %ld, Blkdev get by path: %s\n", PTR_ERR(*bdev),
-		      dev->path);
-		return PTR_ERR(*bdev);
-	}
-
-	if (!(*bdev)->bd_disk) {
-		UINFO("Block dev %s has no bi_disk\n", dev->path);
-		return -ENXIO;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(hmmap_set_bdev);
-
-void hmmap_put_bdev(struct block_device *bdev)
-{
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
-
-	blkdev_put(bdev, mode);
-}
-EXPORT_SYMBOL(hmmap_put_bdev);
-
 MODULE_AUTHOR("Adam Manzanares");
 MODULE_LICENSE("GPL");

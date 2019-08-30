@@ -11,8 +11,6 @@
 #define HMMAP_BLOCK_BACKEND_H
 
 #include <linux/fs.h>
-#include <linux/bio.h>
-#include <linux/blkdev.h>
 
 #define hmmap_sect(off)	((sector_t)(off) >> SECTOR_SHIFT)
 
