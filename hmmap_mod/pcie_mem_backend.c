@@ -21,52 +21,15 @@ struct pcie_mem_backend pcie_membe = {};
 int pcie_mem_init(unsigned long size, unsigned int page_size,
 		  struct hmmap_dev *dev)
 {
-	unsigned int dev_fn;
-	resource_size_t res_size;
 	int ret = 0;
-	struct resource *res;
 	struct hmmap_pcie_info *pcie_info = &pcie_membe.info;
+	resource_size_t res_size;
 
-	if (!dev->pcie_slot) {
-		UINFO("ERROR: PCIE_MEM_BACKEND DOM:BUS:DEV:FN:RES missing\n");
-		ret = -ENXIO;
+	ret = hmmap_pci_get_res(dev, pcie_info, size, &res_size);
+	if (ret)
 		goto out;
-	}
 
-	ret = hmmap_extract_bus_from_path(dev->pcie_slot, pcie_info);
-	if (ret) {
-		UINFO("ERROR: PCIE_MEM_BACKEND PARSE DOM:BUS:DEV:FN:RES\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
-	dev_fn = PCI_DEVFN(pcie_info->dev_num, pcie_info->func);
-	pcie_info->pcie_dev = pci_get_domain_bus_and_slot(pcie_info->domain,
-							  pcie_info->bus,
-							  dev_fn);
-
-	if (!pcie_info->pcie_dev) {
-		UINFO("ERROR: PCIE_MEM_BACKEND GET PCI DEV\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
-	res = &pcie_info->pcie_dev->resource[pcie_info->res_num];
-	if (!(res->flags & IORESOURCE_MEM)) {
-		UINFO("ERROR: PCIE_MEM_BACKEND resource %u NOT MEM\n",
-		      pcie_info->res_num);
-		ret = -ENXIO;
-		goto out_pci_put;
-	}
-
-	res_size = resource_size(res);
-	UINFO("PCIE BACKEND found memory resource of size: %llu\n", res_size);
-	if (res_size < size) {
-		UINFO("ERROR: res less than hmmap dev size of %lu", size);
-		goto out_pci_put;
-	}
-
-	pcie_membe.mem = ioremap_wc(res->start, res_size);
+	pcie_membe.mem = ioremap_wc(pcie_info->res->start, res_size);
 	if (!pcie_membe.mem) {
 		UINFO("ERROR: PCIE_MEM_BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
@@ -76,7 +39,6 @@ int pcie_mem_init(unsigned long size, unsigned int page_size,
 	pcie_membe.size = res_size;
 	pcie_membe.page_size = page_size;
 	pcie_membe.dev = dev;
-	pcie_info->res = res;
 	goto out;
 
 out_pci_put:

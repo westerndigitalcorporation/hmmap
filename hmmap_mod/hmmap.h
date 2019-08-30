@@ -121,5 +121,7 @@ struct hmmap_backend *hmmap_find_backend(const char *name);
 void hmmap_release_page(struct hmmap_dev *udev, struct page *page);
 void hmmap_clear_xamap(struct page *page);
 int hmmap_extract_bus_from_path(const char *path, struct hmmap_pcie_info *info);
+int hmmap_pci_get_res(struct hmmap_dev *dev, struct hmmap_pcie_info *info,
+		      unsigned long size, resource_size_t *res_size);
 
 #endif

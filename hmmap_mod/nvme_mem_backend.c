@@ -23,61 +23,18 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 			struct hmmap_dev *dev)
 {
 	int ret = 0;
-	struct resource *res;
-	resource_size_t res_size;
-	unsigned int dev_fn;
 	struct hmmap_pcie_info *pcie_info = &nvme_mem_be.info;
-
-	nvme_mem_be.size = size;
-	nvme_mem_be.page_size = page_size;
-	nvme_mem_be.dev = dev;
+	resource_size_t res_size;
 
 	ret = hmmap_set_bdev(dev, &nvme_mem_be.bdev);
 	if (ret)
 		goto out;
 
-	if (!dev->pcie_slot) {
-		UINFO("ERROR NVME MEM BACKEND NO PCIE SLOT\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
-	ret = hmmap_extract_bus_from_path(dev->pcie_slot, pcie_info);
-	if (ret) {
-		UINFO("ERROR: NVME MEM BACKEND PARSE DOM:BUS:DEV:FN:RES\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
-	dev_fn = PCI_DEVFN(pcie_info->dev_num, pcie_info->func);
-	pcie_info->pcie_dev = pci_get_domain_bus_and_slot(pcie_info->domain,
-							  pcie_info->bus,
-							  dev_fn);
-
-	if (!pcie_info->pcie_dev) {
-		UINFO("ERROR: NVME MEM BACKEND GET PCI DEV\n");
-		ret = -ENXIO;
+	ret = hmmap_pci_get_res(dev, pcie_info, size, &res_size);
+	if (ret)
 		goto out_release_blkdev;
-	}
 
-	res = &pcie_info->pcie_dev->resource[pcie_info->res_num];
-	if (!(res->flags & IORESOURCE_MEM)) {
-		UINFO("ERROR: NVME MEM BACKEND resource %u NOT MEM\n",
-		      pcie_info->res_num);
-		ret = -ENXIO;
-		goto out_pci_put;
-	}
-
-	res_size = resource_size(res);
-	UINFO("NVME MEM BACKEND found memory resource of size: %llu\n",
-	      res_size);
-	if (res_size < size) {
-		UINFO("ERROR: res less than hmmap dev size of %lu", size);
-		goto out_pci_put;
-	}
-
-	pcie_info->res = res;
-	nvme_mem_be.mem = ioremap_cache(res->start, res_size);
+	nvme_mem_be.mem = ioremap_cache(pcie_info->res->start, res_size);
 	if (!nvme_mem_be.mem) {
 		UINFO("ERROR: NVME MEM BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
@@ -87,15 +44,20 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 	if (pci_p2pdma_add_resource(pcie_info->pcie_dev, pcie_info->res_num,
 				    res_size, 0)) {
 		UINFO("ERROR: NVME MEM BACKEND PCI P2PDMA ADD RESOURCE\n");
+		ret = -ENXIO;
 		goto out_pci_put;
 	}
 
 	nvme_mem_be.p2p_mem = pci_alloc_p2pmem(pcie_info->pcie_dev, res_size);
 	if (!nvme_mem_be.p2p_mem) {
 		UINFO("ERROR: NVME MEM BACKEND PCI P2PDMA ALLOC");
+		ret = -ENXIO;
 		goto out_pci_put;
 	}
 
+	nvme_mem_be.size = res_size;
+	nvme_mem_be.page_size = page_size;
+	nvme_mem_be.dev = dev;
 	goto out;
 
 out_pci_put:

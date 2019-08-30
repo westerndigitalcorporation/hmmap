@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/page-flags.h>
 #include <linux/pagemap.h>
+#include <linux/pci.h>
 
 #include "hmmap.h"
 
@@ -114,6 +115,61 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL(hmmap_extract_bus_from_path);
+
+int hmmap_pci_get_res(struct hmmap_dev *dev, struct hmmap_pcie_info *info,
+		      unsigned long size, resource_size_t *res_size)
+{
+	unsigned int dev_fn;
+	int ret = 0;
+	struct resource *res;
+
+	if (!dev->pcie_slot) {
+		UINFO("ERROR: HMMAP PCI GET DOM:BUS:DEV:FN:RES missing\n");
+		ret = -ENXIO;
+		goto out;
+	}
+
+	ret = hmmap_extract_bus_from_path(dev->pcie_slot, info);
+	if (ret) {
+		UINFO("ERROR: HMMAP PCI GET PARSE DOM:BUS:DEV:FN:RES\n");
+		ret = -ENXIO;
+		goto out;
+	}
+
+	dev_fn = PCI_DEVFN(info->dev_num, info->func);
+	info->pcie_dev = pci_get_domain_bus_and_slot(info->domain, info->bus,
+						     dev_fn);
+
+	if (!info->pcie_dev) {
+		UINFO("ERROR: HMMAP PCI GET NO PCI DEV\n");
+		ret = -ENXIO;
+		goto out;
+	}
+
+	res = &info->pcie_dev->resource[info->res_num];
+	if (!(res->flags & IORESOURCE_MEM)) {
+		UINFO("ERROR: HMMAP PCI GET resource %u NOT MEM\n",
+		      info->res_num);
+		ret = -ENXIO;
+		goto out_pci_put;
+	}
+
+	info->res = res;
+	*res_size = resource_size(res);
+	UINFO("HMMAP PCI GET found memory resource of size: %llu\n", *res_size);
+	if (*res_size < size) {
+		UINFO("ERROR: res less than hmmap dev size of %lu", size);
+		goto out_pci_put;
+	}
+
+out_pci_put:
+	pci_dev_put(info->pcie_dev);
+
+out:
+	return ret;
+
+}
+EXPORT_SYMBOL(hmmap_pci_get_res);
 
 MODULE_AUTHOR("Adam Manzanares");
 MODULE_LICENSE("GPL");
