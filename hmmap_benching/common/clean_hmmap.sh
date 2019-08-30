@@ -23,5 +23,6 @@ do
 done
 
 rmmod hmmap_list
+rmmod hmmap_block_common
 rmmod hmmap_common
 rm -f /dev/hmmap
