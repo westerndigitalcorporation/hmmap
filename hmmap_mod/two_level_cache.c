@@ -519,7 +519,7 @@ int two_level_reserve_page(unsigned long offset, struct hmmap_dev *dev,
 	unsigned items_to_process;
 	unsigned long watermark;
 	int ret = 0;
-	unsigned long flags;
+	unsigned long flags = 0;
 
 	UTRACE("enter\n");
 	/* Sanity Check */
