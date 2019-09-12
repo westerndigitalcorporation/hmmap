@@ -30,7 +30,7 @@ void hmmap_block_end_io(struct bio *bio)
 	struct hmmap_dev *udev = common->udev;
 	struct page *page = done->page;
 
-	UDEBUG("HMMAP BLOCK END IO OFFSET: %lu\n", bio->bi_iter.bi_sector);
+	UDEBUG("HMMAP BLOCK END IO OFFSET: %llu\n", bio->bi_iter.bi_sector);
 	if (atomic_dec_and_test(&(common->waiters)))
 		complete(&common->done);
 
