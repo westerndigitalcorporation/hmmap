@@ -227,11 +227,10 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	unsigned short num_pages = 0;
 	struct address_space *as = vma->vm_file->f_mapping;
 	bool race = false;
-	unsigned long flags;
 	spinlock_t *ptl;
 	pte_t *pte;
-	XA_STATE(xas, &as->i_pages, off);
 	struct mmu_notifier_range range;
+	unsigned long flags;
 
 	UDEBUG("Entering hmmap handle fault\n");
 	UDEBUG("Down sem cache sem attempt\n");
@@ -262,20 +261,33 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		goto out;
 	}
 
+	if (!read)
+		downgrade_write(&udev->rw_sem);
+
 	page_in = insert_info->page_in;
 	/* Attempt to reserve the spot */
-	xas_lock_irqsave(&xas, flags);
-	page = xas_load(&xas);
+	xa_lock_irqsave(&as->i_pages, flags);
+	page = __xa_cmpxchg(&as->i_pages, off, NULL, page_in, GFP_ATOMIC);
+	ret = xa_err(page);
+	if (ret)
+		BUG();
+
 	if (page) {
-		race = true;
-		UDEBUG("RACE on a page\n");
+		if (udev->wrprotect && page == udev->backend->get_page(off)) {
+			__xa_store(&as->i_pages, off, page_in, GFP_ATOMIC);
+			UDEBUG("RACE WITH READ PAGE\n");
+		} else {
+			race = true;
+			UDEBUG("RACE ON A PAGE\n");
+		}
 	} else {
 		UDEBUG("Free spot in xarray\n");
-		xas_store(&xas, page_in);
-		lock_page(page_in);
 	}
+	xa_unlock_irqrestore(&as->i_pages, flags);
 
-	xas_unlock_irqrestore(&xas, flags);
+	if (!race)
+		lock_page(page_in);
+
 	/* Only hande an eviction if we need to */
 	if (insert_info->out_pages) {
 		num_pages = insert_info->num_pages;
@@ -283,8 +295,6 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		atomic_set(&udev->cache_pages, num_pages);
 	}
 
-	if (!read)
-		downgrade_write(&udev->rw_sem);
 	/* If we encountered a race, wait for winner to install pte */
 	if (race) {
 		udev->cache_manager->release_page(page_in);
@@ -350,12 +360,11 @@ out:
 }
 
 vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
-				 struct hmmap_dev *udev)
+				  struct hmmap_dev *udev)
 {
 	struct page *page, *xa_page;
 	pgprot_t pgprot;
 	struct address_space *as = vmf->vma->vm_file->f_mapping;
-	XA_STATE(xas, &as->i_pages, off);
 	unsigned long flags;
 
 	/*direct mapping ask the backend for the page */
@@ -363,26 +372,42 @@ vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 	if (!page)
 		return VM_FAULT_OOM;
 
+	lock_page(page);
+	xa_lock_irqsave(&as->i_pages, flags);
+	xa_page = __xa_cmpxchg(&as->i_pages, off, page, NULL, GFP_ATOMIC);
 	if (udev->wrprotect) {
+		unlock_page(page);
 		/* Write during write protect go straight to cache */
-		if (vmf->flags & FAULT_FLAG_WRITE)
+		if (vmf->flags & FAULT_FLAG_WRITE) {
+			if (xa_page && xa_page != page) {
+				xa_unlock_irqrestore(&as->i_pages, flags);
+				wait_on_page_locked(xa_page);
+				return VM_FAULT_NOPAGE;
+			} else if (xa_page && xa_page == page) {
+				__xa_erase(&as->i_pages, off);
+			}
+
+			xa_unlock_irqrestore(&as->i_pages, flags);
 			return hmmap_handle_fault(off, vmf, udev);
+		}
 
 		pgprot = PAGE_READONLY;
 	} else
 		pgprot = PAGE_SHARED;
 
 	UDEBUG("Dax insert at off %lu\n", off);
-	wait_on_page_locked(page);
-	xas_lock_irqsave(&xas, flags);
-	xa_page = xas_store(&xas, page);
-	xas_unlock_irqrestore(&xas, flags);
-	if (xa_page) {
-		wait_on_page_locked(xa_page);
+	unlock_page(page);
+	xa_unlock_irqrestore(&as->i_pages, flags);
+	if (udev->wrprotect && xa_page) {
+		/* Only wait for a cache page */
+		if (xa_page != page)
+			wait_on_page_locked(xa_page);
+
 		return VM_FAULT_NOPAGE;
 	} else
 		return vmf_insert_pfn_prot(vmf->vma, vmf->address,
 					   page_to_pfn(page), pgprot);
+
 }
 
 vm_fault_t hmmap_vm_fault(struct vm_fault *vmf)
@@ -407,20 +432,25 @@ vm_fault_t hmmap_vm_pfn_mkwrite(struct vm_fault *vmf)
 	unsigned long off = vmf->pgoff << PAGE_SHIFT;
 	struct vm_area_struct *vma = vmf->vma;
 	struct hmmap_dev *udev = (struct hmmap_dev *)vma->vm_private_data;
-	int ret;
 	unsigned long vma_address;
 	struct address_space *as = vma->vm_file->f_mapping;
-	XA_STATE(xas, &as->i_pages, off);
+	struct page *page, *xa_page;
 	unsigned long flags;
 
+	page = udev->backend->get_page(off);
 	vma_address = vma->vm_start + (off - (vma->vm_pgoff << PAGE_SHIFT));
 	UDEBUG("Write Fault at addr:%lu,off:%lu\n", vmf->address, off);
-	xas_lock_irqsave(&xas, flags);
-	xas_store(&xas, NULL);
-	xas_unlock_irqrestore(&xas, flags);
-	ret = hmmap_handle_fault(off, vmf, udev);
+	lock_page(page);
+	xa_lock_irqsave(&as->i_pages, flags);
+	xa_page = __xa_cmpxchg(&as->i_pages, off, page, NULL, GFP_ATOMIC);
+	xa_unlock_irqrestore(&as->i_pages, flags);
+	unlock_page(page);
+	if (xa_page ==  page || !xa_page)
+		return hmmap_handle_fault(off, vmf, udev);
 
-	return ret;
+	wait_on_page_locked(xa_page);
+
+	return VM_FAULT_NOPAGE;
 }
 
 int hmmap_fop_open(struct inode *inode, struct file *filp)

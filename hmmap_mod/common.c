@@ -19,8 +19,9 @@ void hmmap_clear_xamap(struct page *page)
 {
 	struct address_space *as = page->mapping;
 
-	XA_STATE(xas, &as->i_pages, page->index);
-	xas_store(&xas, NULL);
+	xa_lock(&as->i_pages);
+	__xa_erase(&as->i_pages, page->index);
+	xa_unlock(&as->i_pages);
 	page->mapping = NULL;
 	UDEBUG("Freeing page %p at offset %lu in as %p\n", page, page->index,
 	       as);
