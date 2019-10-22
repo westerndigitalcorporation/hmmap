@@ -11,7 +11,6 @@
 #include <linux/namei.h>
 #include <linux/dax.h>
 #include <linux/pfn_t.h>
-#include <../drivers/dax/dax.h>
 #include <../drivers/dax/dax-private.h>
 
 #include "dax_backend.h"
@@ -51,14 +50,8 @@ int dax_init(unsigned long size, unsigned int page_size, struct hmmap_dev *dev)
 
 	dev_dax = dax_get_private(dax);
 
-	if (!dev_dax->region || !dev_dax->region->base) {
+	if (!dev_dax->region) {
 		UINFO("ERROR: Unable to find a dax memory region\n");
-		return -ENOMEM;
-	}
-
-	/* To make things simple we assume one resource */
-	if (dev_dax->num_resources != 1) {
-		UINFO("ERROR: Only supporting dax device with one resource\n");
 		return -ENOMEM;
 	}
 
@@ -80,12 +73,14 @@ int dax_init(unsigned long size, unsigned int page_size, struct hmmap_dev *dev)
 	return 0;
 }
 
-pfn_t dax_get_pfn(unsigned long offset)
+struct page *dax_get_page(unsigned long offset)
 {
 	struct resource *res = &dax_info.dev_dax->region->res;
 	phys_addr_t phys = res->start + offset;
+	pfn_t phys_pfn_t;
 
-	return phys_to_pfn_t(phys, dax_info.dev_dax->region->pfn_flags);
+	phys_pfn_t = phys_to_pfn_t(phys, dax_info.dev_dax->region->pfn_flags);
+	return pfn_t_to_page(phys_pfn_t);
 }
 
 void *dax_mem(unsigned long offset)
@@ -128,7 +123,7 @@ void dax_destroy(void)
 static struct hmmap_backend dax_backend = {
 	.name = "dax_backend",
 	.init = dax_init,
-	.get_pfn = dax_get_pfn,
+	.get_page = dax_get_page,
 	.fill_cache = dax_fill_cache,
 	.flush_pages = dax_flush_pages,
 	.destroy = dax_destroy,
