@@ -36,7 +36,7 @@ void hmmap_release_page(struct hmmap_dev *udev, struct page *page)
 	hmmap_clear_xamap(page);
 	if (!PageUptodate(page)) {
 		unlock_page(page);
-		udev->cache_manager->release_page(page);
+		udev->cache_manager->release_page(page, udev);
 		up(&udev->cache_sem);
 		UDEBUG("Up udev cache sem release dirty page\n");
 	} else {
