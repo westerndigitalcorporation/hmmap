@@ -17,7 +17,7 @@
 
 #define hmmap_sect(off)	((sector_t)(off) >> SECTOR_SHIFT)
 
-struct nvme_mem_backend {
+struct nvme_mem_be {
 	void *p2p_mem;
 	void __iomem *mem;
 	struct hmmap_dev *dev;
