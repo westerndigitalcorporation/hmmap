@@ -25,13 +25,10 @@
 
 #include "hmmap.h"
 
-static struct kobject *hmmap_kobj;
-
 int hmmap_major;
 int hmmap_devs	= HMMAP_DEVS;
 unsigned long cache_size = CACHE_SIZE;
 unsigned long device_size = DEVICE_SIZE;
-unsigned long device_delay = 0;
 unsigned int cache_pages = 0;
 unsigned int device_pages = 0;
 static char *caching_policy = "two_level_cache";
@@ -44,95 +41,117 @@ struct hmmap_dev *hmmap_devices;
 module_param(hmmap_devs, int, 0);
 module_param(cache_size, ulong, 0);
 module_param(device_size, ulong, 0);
-module_param(device_delay, ulong, 0);
 module_param(caching_policy, charp, 0);
 module_param(backend_device, charp, 0);
 module_param(backend_path, charp, 0);
 module_param(pcie_slot, charp, 0);
 
-static ssize_t hmmap_kobj_delay_store(struct kobject *kobj,
-				     struct kobj_attribute *attr,
-				     const char *buf,
-				     size_t count)
+struct hdev_sysfs_entry {
+	struct attribute attr;
+	ssize_t (*show)(struct hmmap_dev *dev, char *);
+	ssize_t (*store)(struct hmmap_dev *dev, const char *, size_t);
+};
+
+#define hmmap_sysfs_rw(field)					               \
+static ssize_t hmmap_sysfs_##field##_show(struct hmmap_dev *dev, char *buf)    \
+{									       \
+	return snprintf(buf, PAGE_SIZE, "%s:%u\n", dev->backend->name,	       \
+			dev->field);				               \
+}									       \
+									       \
+static ssize_t hmmap_sysfs_##field##_store(struct hmmap_dev *dev,	       \
+					   const char *buf, size_t count)      \
+{									       \
+	unsigned int temp;						       \
+									       \
+	if (kstrtouint(buf, 0, &temp) < 0)				       \
+		return count;						       \
+									       \
+	/* Make sure we are true or false, TODO has to be a better way */      \
+	if (temp != 0 && temp != 1)					       \
+		return count;						       \
+									       \
+	if (dev->backend->get_page)					       \
+		dev->field = temp;					       \
+									       \
+	return count;							       \
+}									       \
+									       \
+static struct hdev_sysfs_entry field##_entry = {			       \
+	.attr = {.name = #field, .mode = 0644 },			       \
+	.show = hmmap_sysfs_##field##_show,				       \
+	.store = hmmap_sysfs_##field##_store,				       \
+};									       \
+
+hmmap_sysfs_rw(dax);
+hmmap_sysfs_rw(wrprotect);
+
+static ssize_t hmmap_sysfs_delay_store(struct hmmap_dev *dev,
+				       const char *buf, size_t count)
 {
-	sscanf(buf, "%lu", &device_delay);
+	sscanf(buf, "%lu", &dev->delay);
 	return count;
 }
 
-static ssize_t hmmap_kobj_delay_show(struct kobject *kobj,
-				    struct kobj_attribute *attr,
-				    char *buf)
+static ssize_t hmmap_sysfs_delay_show(struct hmmap_dev *dev, char *buf)
 {
-	return sprintf(buf, "%lu\n", device_delay);
+	return sprintf(buf, "%lu\n", dev->delay);
 }
 
-static struct kobj_attribute hmmap_delay_attr = __ATTR(delay, S_IWUSR | S_IRUGO,
-						      hmmap_kobj_delay_show,
-						      hmmap_kobj_delay_store);
-
-
-#define hmmap_dev_sysfs_rw(field)					     \
-static ssize_t hmmap_dev_##field##_show(struct device *dev,		     \
-			     struct device_attribute *attr, char *buf)       \
-{									     \
-	struct hmmap_dev *hmmap_dev = hmmap_devices;			     \
-	unsigned int cur_dev = 0;					     \
-	ssize_t written = 0;						     \
-									     \
-	/* Iterate over the devices and set the dax capability */	     \
-	for (cur_dev = 0; cur_dev < hmmap_devs; cur_dev++) {	             \
-		written += snprintf(buf + written, PAGE_SIZE - written,      \
-				    "%s:%u\n", hmmap_dev->backend->name,      \
-				    hmmap_dev->field);			     \
-		hmmap_dev++;						     \
-	}								     \
-									     \
-	return written;							     \
-									     \
-}									     \
-									     \
-static ssize_t hmmap_dev_##field##_store(struct device *dev,		     \
-			     struct device_attribute *attr, const char *buf, \
-			     size_t count)				     \
-{									     \
-	unsigned int temp;						     \
-	struct hmmap_dev *hmmap_dev = hmmap_devices;			     \
-	unsigned int cur_dev = 0;					     \
-									     \
-	if (kstrtouint(buf, 0, &temp) < 0)				     \
-		return count;						     \
-									     \
-	/* Make sure we are true or false, TODO has to be a better way */    \
-	if (temp != 0 && temp != 1)					     \
-		return count;						     \
-									     \
-	/* Iterate over the devices and set the dax capability */	     \
-	for (cur_dev = 0; cur_dev < hmmap_devs; cur_dev++) {		     \
-		/* Only set the dax capability on dev that can get_page */   \
-		if (hmmap_dev->backend->get_page)			     \
-			hmmap_dev->field = temp;			     \
-									     \
-		hmmap_dev++;						     \
-	}								     \
-									     \
-	return count;							     \
-}									     \
-static DEVICE_ATTR_RW(hmmap_dev_##field)				     \
-
-hmmap_dev_sysfs_rw(dax);
-hmmap_dev_sysfs_rw(wrprotect);
+static struct hdev_sysfs_entry delay_entry = {
+	.attr = {.name = "delay", .mode = 0644 },
+	.show = hmmap_sysfs_delay_show,
+	.store = hmmap_sysfs_delay_store,
+};
 
 static struct attribute *hmmap_attrs[] = {
-	&dev_attr_hmmap_dev_dax.attr,
-	&dev_attr_hmmap_dev_wrprotect.attr,
-	&hmmap_delay_attr.attr,
+	&dax_entry.attr,
+	&wrprotect_entry.attr,
+	&delay_entry.attr,
 	NULL
 };
 
 static const struct attribute_group hmmap_attr_group = {
-	.name = "hmmap",
 	.attrs = hmmap_attrs,
 };
+
+#define to_hdev(atr) container_of((atr), struct hdev_sysfs_entry, attr)
+
+static ssize_t
+hdev_attr_show(struct kobject *kobj, struct attribute *attr, char *page)
+{
+	struct hdev_sysfs_entry *entry = to_hdev(attr);
+	struct hmmap_dev *dev = container_of(kobj, struct hmmap_dev, kobj);
+
+	if (!entry || !entry->show || !dev)
+		return -EIO;
+
+	return entry->show(dev, page);
+}
+
+static ssize_t
+hdev_attr_store(struct kobject *kobj, struct attribute *attr,
+		const char *page, size_t length)
+{
+	struct hdev_sysfs_entry *entry = to_hdev(attr);
+	struct hmmap_dev *dev = container_of(kobj, struct hmmap_dev, kobj);
+
+	if (!entry || !entry->store || !dev)
+		return -EIO;
+
+	return entry->store(dev, page, length);
+}
+
+static const struct sysfs_ops hdev_sysfs_ops = {
+	.show	= hdev_attr_show,
+	.store	= hdev_attr_store,
+};
+
+struct kobj_type hdev_ktype = {
+	.sysfs_ops	= &hdev_sysfs_ops,
+	.release	= NULL,
+};
+
 
 void hmmap_fault_range(struct vm_area_struct *vma, unsigned long offset)
 {
@@ -184,7 +203,7 @@ void hmmap_find_dirty_pages(struct vm_area_struct *vma,
 		page = list_first_entry(&clean_pages, struct page, lru);
 		list_del_init(&page->lru);
 		unlock_page(page);
-		udev->cache_manager->release_page(page);
+		udev->cache_manager->release_page(page, udev);
 		up(&udev->cache_sem);
 		UDEBUG("Up udev cache sem clean page\n");
 	}
@@ -273,7 +292,8 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		BUG();
 
 	if (page) {
-		if (udev->wrprotect && page == udev->backend->get_page(off)) {
+		if (udev->wrprotect && page ==
+		    udev->backend->get_page(off, udev)) {
 			__xa_store(&as->i_pages, off, page_in, GFP_ATOMIC);
 			UDEBUG("RACE WITH READ PAGE\n");
 		} else {
@@ -297,7 +317,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 
 	/* If we encountered a race, wait for winner to install pte */
 	if (race) {
-		udev->cache_manager->release_page(page_in);
+		udev->cache_manager->release_page(page_in, udev);
 		atomic_inc(&udev->cache_pages);
 		up(&udev->cache_sem);
 		UDEBUG("Up udev cache sem race\n");
@@ -310,7 +330,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 	UDEBUG("Map dev addr: %lu cache addr %p\n", off, cache_address);
 	/* Copy backend contents to new cache location */
 	if (insert_info->is_hard_pagefault) {
-		ret = udev->backend->fill_cache(cache_address, off);
+		ret = udev->backend->fill_cache(cache_address, off, udev);
 		if (ret) {
 			UINFO("ERROR fill cache offset %lu", off);
 			BUG();
@@ -340,7 +360,7 @@ vm_fault_t hmmap_handle_fault(unsigned long off, struct vm_fault *vmf,
 		BUG();
 	}
 
-	udev->cache_manager->insert_page(page_in);
+	udev->cache_manager->insert_page(page_in, udev);
 	page_in->index = off;
 	ClearPageDirty(page_in);
 	unlock_page(page_in);
@@ -368,7 +388,7 @@ vm_fault_t hmmap_handle_dax_fault(unsigned long off, struct vm_fault *vmf,
 	unsigned long flags;
 
 	/*direct mapping ask the backend for the page */
-	page = udev->backend->get_page(off);
+	page = udev->backend->get_page(off, udev);
 	if (!page)
 		return VM_FAULT_OOM;
 
@@ -437,7 +457,7 @@ vm_fault_t hmmap_vm_pfn_mkwrite(struct vm_fault *vmf)
 	struct page *page, *xa_page;
 	unsigned long flags;
 
-	page = udev->backend->get_page(off);
+	page = udev->backend->get_page(off, udev);
 	vma_address = vma->vm_start + (off - (vma->vm_pgoff << PAGE_SHIFT));
 	UDEBUG("Write Fault at addr:%lu,off:%lu\n", vmf->address, off);
 	lock_page(page);
@@ -675,32 +695,35 @@ static int __init hmmap_module_init(void)
 		goto unregister_out;
 	}
 
-	/* Create this before initializing the cache and backend */
-	/* Hang module sysfs entries off the hmmap entries */
-	hmmap_kobj = kobject_create_and_add("hmmap", kernel_kobj);
-	if (!hmmap_kobj) {
-		UINFO("KOBJECT CREATE FAIL\n");
-		ret = -ENOMEM;
-		goto dev_cleanup;
-	}
-
 	memset(hmmap_devices, 0, sizeof(struct hmmap_dev) * hmmap_devs);
 	hmmap_dev = hmmap_devices; /* Current device is the first device */
 	ret = request_module("hmmap_%s", caching_policy);
 	if (ret) {
 		UINFO("Request Module:%s, Ret:%d\n", caching_policy, ret);
-		goto kobj_cleanup;
+		goto free_devs;
 	}
 
 	ret = request_module("hmmap_%s", backend_device);
 	if (ret) {
 		UINFO("Request Module:%s, Ret:%d\n", backend_device, ret);
-		goto kobj_cleanup;
+		goto free_devs;
 	}
 
 	for (i = 0; i < hmmap_devs; ++i) {
+		/* Create this before initializing the cache and backend */
+		/* Hang module sysfs entries off the hmmap entries */
+		kobject_init(&hmmap_dev->kobj, &hdev_ktype);
+		ret = kobject_add(&hmmap_dev->kobj, kernel_kobj, "%s_%d",
+				  "hmmap", i);
+		if (ret < 0) {
+			UINFO("KOBJECT CREATE FAIL\n");
+			ret = -ENOMEM;
+			goto dev_cleanup;
+		}
+
 		hmmap_dev->path = backend_path;
 		hmmap_dev->pcie_slot = pcie_slot;
+		hmmap_dev->delay = 0;
 		sema_init(&hmmap_dev->cache_sem, cache_pages + 1);
 		init_rwsem(&hmmap_dev->rw_sem);
 		atomic_set(&hmmap_dev->cache_pages, cache_pages + 1);
@@ -710,52 +733,57 @@ static int __init hmmap_module_init(void)
 		if (!hmmap_dev->cache_manager) {
 			UINFO("Cache Manager: %s NOT FOUND\n", caching_policy);
 			ret = -ENOENT;
-			goto kobj_cleanup;
+			goto dev_cleanup;
 		}
 
 		ret = hmmap_dev->cache_manager->init(cache_size, PAGE_SIZE,
-						    hmmap_dev, hmmap_kobj);
+						     hmmap_dev);
 		if (ret)
-			goto kobj_cleanup;
+			goto dev_cleanup;
 
 		hmmap_dev->backend = hmmap_find_backend(backend_device);
 		if (!hmmap_dev->backend) {
-			hmmap_dev->cache_manager->destroy(hmmap_kobj);
+			hmmap_dev->cache_manager->destroy(hmmap_dev);
 			UINFO("Backend: %s NOT FOUND\n", backend_device);
 			ret = -ENOENT;
-			goto kobj_cleanup;
+			goto dev_cleanup;
 		}
 
 		ret = hmmap_dev->backend->init(device_size, PAGE_SIZE,
 					       hmmap_dev);
 		if (ret)
-			goto cache_cleanup;
+			goto dev_cleanup;
 
 		hmmap_setup_cdev(hmmap_dev, i);
+		ret = sysfs_create_group(&hmmap_dev->kobj, &hmmap_attr_group);
+		if (ret) {
+			UINFO("HMMAP SYSFS CREATE GROUP FAILS\n");
+			kobject_put(&hmmap_dev->kobj);
+			goto dev_cleanup;
+		}
+
 		hmmap_dev++; /* Move onto the next device in the list */
 	}
 
 	INIT_LIST_HEAD(&extent_list.list);	
-	ret = sysfs_create_group(hmmap_kobj, &hmmap_attr_group);
-	if (ret) {
-		UINFO("HMMAP SYSFS CREATE GROUP FAILS\n");
-		kobject_put(hmmap_kobj);
-		goto unregister_out;
-	}
-
 	UINFO("INIT SUCCESS\n");
 	UINFO("Device Size:%lu Pages: %u, Cache Size:%lu Pages:%u\n",
 	       device_size,device_pages,cache_size,cache_pages);
 	goto out;
 
-cache_cleanup:
-	hmmap_dev->cache_manager->destroy(hmmap_kobj);
-kobj_cleanup:
-	kobject_put(hmmap_kobj);
+/* Cleanup all that we created */
 dev_cleanup:
+	while (i) {
+		hmmap_dev->backend->destroy(hmmap_dev);
+		hmmap_dev->cache_manager->destroy(hmmap_dev);
+		kobject_del(&hmmap_dev->kobj);
+		hmmap_dev--;
+		i--;
+	}
+free_devs:
 	kfree(hmmap_devices);
 unregister_out:
-	UINFO("INIT ERROR UNREGESTERING THE DEVICE\n");
+	UINFO("INIT ERROR UNREGESTERING THE DEVICES\n");
 	unregister_chrdev_region(dev, hmmap_devs);
 out:
 	return ret;
@@ -768,13 +796,13 @@ static void __exit hmmap_module_exit(void)
 	UINFO("MODULE EXIT\n");
 	dev = hmmap_devices;
 	for (i = 0; i < hmmap_devs; ++i) {
-		cdev_del(&hmmap_devices[i].cdev);
-		dev->cache_manager->destroy(hmmap_kobj);
-		dev->backend->destroy();
-
+		cdev_del(&dev->cdev);
+		dev->cache_manager->destroy(dev);
+		dev->backend->destroy(dev);
+		kobject_del(&dev->kobj);
+		dev++;
 	}
 	kfree(hmmap_devices);
-	kobject_put(hmmap_kobj);
 	unregister_chrdev_region(MKDEV(hmmap_major, 0), hmmap_devs);
 }
 

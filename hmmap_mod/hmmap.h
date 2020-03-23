@@ -65,7 +65,9 @@ struct hmmap_dev {
 	int reference;
 	struct cdev cdev;
 	const struct hmmap_backend *backend;
+	void *be_priv;
 	const struct hmmap_cache_manager *cache_manager;
+	void *c_priv;
 	const char *path; /* Only used if we have a backing device */
 	const char *pcie_slot; /* Used to get the memory on a bar */
 	bool dax;
@@ -74,19 +76,21 @@ struct hmmap_dev {
 	struct rw_semaphore rw_sem;
 	atomic_t  cache_pages;
 	struct list_head dirty_pages;
+	unsigned long delay;
+	struct kobject kobj;
 };
 
 struct hmmap_cache_manager {
 	const char *name;
-	int (*init)(unsigned long size, unsigned page_size, 
-		    struct hmmap_dev *dev, struct kobject *kobj);
+	int (*init)(unsigned long size, unsigned page_size,
+		    struct hmmap_dev *dev);
 	int (*reserve_page)(unsigned long offset, struct hmmap_dev *dev,
 			    struct vm_area_struct *vma,
 			    struct hmmap_insert_info *info);
-	void (*release_page)(struct page *page);
-	void (*insert_page)(struct page *page);
+	void (*release_page)(struct page *page, struct hmmap_dev *dev);
+	void (*insert_page)(struct page *page, struct hmmap_dev *dev);
 	int (*clear)(struct hmmap_dev *dev, struct hmmap_insert_info *info);
-	void (*destroy)(struct kobject *kobj);
+	void (*destroy)(struct hmmap_dev *dev);
 	struct list_head list;
 };
 
@@ -94,10 +98,10 @@ struct hmmap_backend {
 	const char *name;
 	int (*init)(unsigned long size, unsigned page_size, 
 		    struct hmmap_dev *dev);
-	struct page *(*get_page)(unsigned long offset);
-	int (*fill_cache)(void *cache_address, unsigned long offset);
-	int (*flush_pages)(struct hmmap_dev *udev);
-	void (*destroy)(void);
+	struct page *(*get_page)(unsigned long, struct hmmap_dev *);
+	int (*fill_cache)(void *, unsigned long, struct hmmap_dev *);
+	int (*flush_pages)(struct hmmap_dev *);
+	void (*destroy)(struct hmmap_dev *);
 	struct list_head list;
 };
 
