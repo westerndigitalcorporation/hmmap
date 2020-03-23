@@ -14,7 +14,7 @@
 
 #define hmmap_sect(off)	((sector_t)(off) >> SECTOR_SHIFT)
 
-struct block_backend_info {
+struct block_be_info {
 	void *data_buffer;
 	struct hmmap_dev *dev;
 	unsigned long size;
