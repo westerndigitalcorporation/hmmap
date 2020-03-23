@@ -10,7 +10,7 @@
 #ifndef MEM_BACKEND_H
 #define MEM_BACKEND_H
 
-struct mem_backend_info {
+struct mem_be_info {
 	void *mem;
 	struct hmmap_dev *dev;
 	unsigned long size;
