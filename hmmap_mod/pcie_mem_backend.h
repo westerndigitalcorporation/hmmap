@@ -15,7 +15,7 @@
 #define CHAR_IN_AVX2 32
 
 
-struct pcie_mem_backend {
+struct pcie_mem_be {
 	void __iomem *mem;
 	struct hmmap_dev *dev;
 	unsigned long size;

@@ -16,29 +16,35 @@
 #include "pcie_mem_backend.h"
 #include "hmmap.h"
 
-struct pcie_mem_backend pcie_membe = {};
 
 int pcie_mem_init(unsigned long size, unsigned int page_size,
 		  struct hmmap_dev *dev)
 {
+	struct pcie_mem_be *pm_be;
 	int ret = 0;
-	struct hmmap_pcie_info *pcie_info = &pcie_membe.info;
+	struct hmmap_pcie_info *pcie_info;
 	resource_size_t res_size;
 
+	pm_be = kzalloc(sizeof(struct pcie_mem_be), GFP_KERNEL);
+	if (!pm_be)
+		return -ENOMEM;
+
+	pcie_info = &pm_be->info;
 	ret = hmmap_pci_get_res(dev, pcie_info, size, &res_size);
 	if (ret)
 		goto out;
 
-	pcie_membe.mem = ioremap_wc(pcie_info->res->start, res_size);
-	if (!pcie_membe.mem) {
+	pm_be->mem = ioremap_wc(pcie_info->res->start, res_size);
+	if (!pm_be->mem) {
 		UINFO("ERROR: PCIE_MEM_BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
 		goto out_pci_put;
 	}
 
-	pcie_membe.size = res_size;
-	pcie_membe.page_size = page_size;
-	pcie_membe.dev = dev;
+	pm_be->size = res_size;
+	pm_be->page_size = page_size;
+	pm_be->dev = dev;
+	dev->be_priv = (void *)pm_be;
 	goto out;
 
 out_pci_put:
@@ -47,60 +53,81 @@ out:
 	return ret;
 }
 
-void *pcie_mem(unsigned long off)
+void *pcie_mem(unsigned long off, struct pcie_mem_be *pm_be)
 {
-	return pcie_membe.mem + off;
+	return pm_be->mem + off;
 }
 
-void pcie_mem_fill_cache_avx2(void *cache_addr, unsigned long off)
+void pcie_mem_fill_cache_avx2(void *cache_addr, unsigned long off,
+			      struct pcie_mem_be *pm_be)
 {
 	unsigned int pos;
-	char *dev_ptr = (char *)pcie_mem(off);
+	char *dev_ptr = (char *)pcie_mem(off, pm_be);
 	char *cache_ptr = (char *)cache_addr;
 
 	kernel_fpu_begin();
-	for (pos = 0; pos < pcie_membe.page_size; pos += CHAR_IN_AVX2) {
+	for (pos = 0; pos < pm_be->page_size; pos += CHAR_IN_AVX2) {
 		asm volatile("vmovntdqa %0,%%ymm0" : : "m" (dev_ptr[pos]));
 		asm volatile("vmovdqa %%ymm0,%0" : "=m" (cache_ptr[pos]));
 	}
 	kernel_fpu_end();
 }
 
-int pcie_mem_fill_cache(void *cache_address, unsigned long off)
+int pcie_mem_fill_cache(void *cache_address, unsigned long off,
+			struct hmmap_dev *dev)
 {
+	struct pcie_mem_be *pm_be;
+
+	if (!dev || !dev->be_priv)
+		return -EINVAL;
+
+	pm_be = (struct pcie_mem_be *)dev->be_priv;
+
 	if (boot_cpu_has(X86_FEATURE_AVX2))
-		pcie_mem_fill_cache_avx2(cache_address, off);
+		pcie_mem_fill_cache_avx2(cache_address, off, pm_be);
 	else
-		memcpy_fromio(cache_address, pcie_mem(off),
-			      pcie_membe.page_size);
+		memcpy_fromio(cache_address, pcie_mem(off, pm_be),
+			      pm_be->page_size);
 	return 0;
 }
 
-int pcie_mem_flush_pages(struct hmmap_dev *udev)
+int pcie_mem_flush_pages(struct hmmap_dev *dev)
 {
 	unsigned long off;
 	void *cache_address;
 	struct page *page;
+	struct pcie_mem_be *pm_be;
 
+	if (!dev || !dev->be_priv)
+		return -EINVAL;
+
+	pm_be = (struct pcie_mem_be *)dev->be_priv;
 	/* Iterate over the list of pages we are asked to flush out */
-	while (!list_empty(&udev->dirty_pages))	{
-		page = list_first_entry(&udev->dirty_pages, struct page, lru);
+	while (!list_empty(&dev->dirty_pages))	{
+		page = list_first_entry(&dev->dirty_pages, struct page, lru);
 		off = page->index;
 		cache_address = (void *)page->private;
-		memcpy_toio(pcie_mem(off), cache_address,
-			    pcie_membe.page_size);
+		memcpy_toio(pcie_mem(off,pm_be), cache_address,
+			    pm_be->page_size);
 
 		list_del_init(&page->lru);
-		hmmap_release_page(udev, page);
+		hmmap_release_page(dev, page);
 	}
 
 	return 0;
 }
 
-void pcie_mem_destroy(void)
+void pcie_mem_destroy(struct hmmap_dev *dev)
 {
-	iounmap(pcie_membe.mem);
-	pci_dev_put(pcie_membe.info.pcie_dev);
+	struct pcie_mem_be *pm_be;
+
+	if (!dev || !dev->be_priv)
+		return;
+
+	pm_be = (struct pcie_mem_be *)dev->be_priv;
+	iounmap(pm_be->mem);
+	pci_dev_put(pm_be->info.pcie_dev);
+	kfree(pm_be);
 }
 
 static struct hmmap_backend pcie_mem_backend = {
