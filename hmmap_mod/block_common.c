@@ -103,7 +103,7 @@ EXPORT_SYMBOL(hmmap_block_submit_bio);
 
 int hmmap_set_bdev(struct hmmap_dev *dev, struct block_device **bdev)
 {
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
+	fmode_t mode = FMODE_READ | FMODE_WRITE;
 
 	if (!dev->path) {
 		UINFO("ERROR HMMAP SET BDEV NO PATH SET\n");
@@ -186,7 +186,7 @@ EXPORT_SYMBOL(hmmap_block_flush_pages);
 
 void hmmap_put_bdev(struct block_device *bdev)
 {
-	fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
+	fmode_t mode = FMODE_READ | FMODE_WRITE;
 
 	blkdev_put(bdev, mode);
 }
