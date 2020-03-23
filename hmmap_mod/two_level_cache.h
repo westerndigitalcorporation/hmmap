@@ -23,6 +23,11 @@ struct two_level_data {
 	struct list_head free;
 	unsigned active_size;
 	unsigned inactive_size;
+	unsigned long recharge_processed;
+	unsigned long evict_processed;
+	spinlock_t c_lock;
+	struct page **evict_list;
+	unsigned int evict_list_size;
 };
 
 enum two_level_list_type {
