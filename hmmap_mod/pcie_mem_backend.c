@@ -17,7 +17,7 @@
 #include "hmmap.h"
 
 
-int pcie_mem_init(unsigned long size, unsigned int page_size,
+int pcie_mem_init(unsigned long size, unsigned int page_size, unsigned long off,
 		  struct hmmap_dev *dev)
 {
 	struct pcie_mem_be *pm_be;
@@ -34,14 +34,14 @@ int pcie_mem_init(unsigned long size, unsigned int page_size,
 	if (ret)
 		goto out;
 
-	pm_be->mem = ioremap_wc(pcie_info->res->start, res_size);
+	pm_be->mem = ioremap_wc(pcie_info->res->start + off, size);
 	if (!pm_be->mem) {
 		UINFO("ERROR: PCIE_MEM_BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
 		goto out_pci_put;
 	}
 
-	pm_be->size = res_size;
+	pm_be->size = size;
 	pm_be->page_size = page_size;
 	pm_be->dev = dev;
 	dev->be_priv = (void *)pm_be;
