@@ -10,7 +10,7 @@
 #ifndef DAX_BACKEND_H
 #define DAX_BACKEND_H
 
-struct dax_backend_info {
+struct dax_be {
 	void *mem;
 	struct hmmap_dev *dev;
 	unsigned long size;

@@ -11,113 +11,157 @@
 #include <linux/namei.h>
 #include <linux/dax.h>
 #include <linux/pfn_t.h>
+#include <linux/slab.h>
 #include <../drivers/dax/dax-private.h>
 
 #include "dax_backend.h"
 #include "hmmap.h"
 
-struct dax_backend_info dax_info = {};
-
-int dax_init(unsigned long size, unsigned int page_size, struct hmmap_dev *dev)
+int dax_init(unsigned long size, unsigned int page_size, unsigned long off,
+	     struct hmmap_dev *dev)
 {
 	struct dax_device *dax;
 	struct dev_dax *dev_dax;
+	struct dax_be *d_be;
 	struct file *file = NULL;
 	resource_size_t res_size;
+	int ret = 0;
 
-	dax_info.size = size;
-	dax_info.page_size = page_size;
-	dax_info.dev = dev;
+	d_be = kzalloc(sizeof(struct dax_be), GFP_KERNEL);
+	if (!d_be)
+		return -ENOMEM;
+
+
+	d_be->size = size;
+	d_be->page_size = page_size;
+	d_be->dev = dev;
 
 	if (!dev->path) {
 		UINFO("ERROR: DAX BACKEND NO PATH SET\n");
-		return -ENXIO;
+		ret = -ENXIO;
+		goto cleanup;
 	}
 
 	file = filp_open(dev->path, O_RDWR, 0);
 
 	if (IS_ERR(file)) {
 		UINFO("ERROR: Unable to open: %s\n", dev->path);
-		return PTR_ERR(file);
+		ret = PTR_ERR(file);
+		goto cleanup;
 	}
 
 	dax = inode_dax(file->f_inode);
 
 	if (!dax) {
 		UINFO("ERROR: DAX device not found\n");
-		return -1;
+		ret = -EINVAL;
+		goto cleanup;
 	}
 
 	dev_dax = dax_get_private(dax);
 
 	if (!dev_dax->region) {
 		UINFO("ERROR: Unable to find a dax memory region\n");
-		return -ENOMEM;
+		ret = ENOMEM;
+		goto cleanup;
 	}
 
 	res_size = resource_size(&dev_dax->region->res);
-	if (size > res_size) {
+	if (size + off > res_size) {
 		UINFO("ERROR: Dax resource size:%llu smaller ", res_size);
-		UINFO("than  hmmap device size:%lu\n", dax_info.size);
-		return -ENOMEM;
+		UINFO("than  hmmap device size:%lu at off:%lu\n", d_be->size,
+		      off);
+		ret = ENOMEM;
+		goto cleanup;
 	}
 
-	dax_info.mem = phys_to_virt(dev_dax->region->res.start);
-	if (!dax_info.mem) {
+	d_be->mem = phys_to_virt(dev_dax->region->res.start + off);
+	if (!d_be->mem) {
 		UINFO("ERROR: DAX backend memory allocation failed\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto cleanup;
 	}
 
-	dax_info.dev_dax = dev_dax;
+	d_be->dev_dax = dev_dax;
+	dev->be_priv = (void *)d_be;
+	goto out;
 
-	return 0;
+cleanup:
+	kfree(d_be);
+out:
+	return ret;
 }
 
-struct page *dax_get_page(unsigned long offset)
+struct page *dax_get_page(unsigned long offset, struct hmmap_dev *dev)
 {
-	struct resource *res = &dax_info.dev_dax->region->res;
-	phys_addr_t phys = res->start + offset;
+	struct resource *res;
+	phys_addr_t phys;
 	pfn_t phys_pfn_t;
+	struct dax_be *d_be;
 
-	phys_pfn_t = phys_to_pfn_t(phys, dax_info.dev_dax->region->pfn_flags);
+	if (!dev || !dev->be_priv)
+		return NULL;
+
+	d_be = (struct dax_be *)dev->be_priv;
+	res = &d_be->dev_dax->region->res;
+	phys = res->start + offset;
+	phys_pfn_t = phys_to_pfn_t(phys, d_be->dev_dax->region->pfn_flags);
 	return pfn_t_to_page(phys_pfn_t);
 }
 
-void *dax_mem(unsigned long offset)
+void *dax_mem(unsigned long offset, struct dax_be *d_be)
 {
-	return dax_info.mem + offset;
+	return d_be->mem + offset;
 }
 
-int dax_fill_cache(void *cache_address, unsigned long off)
+int dax_fill_cache(void *cache_address, unsigned long off,
+		   struct hmmap_dev *dev)
 {
-	memcpy(cache_address, dax_mem(off), dax_info.page_size);
+	struct dax_be *d_be;
+
+	if (!dev || !dev->be_priv)
+		return -EINVAL;
+
+	d_be = (struct dax_be *)dev->be_priv;
+	memcpy(cache_address, dax_mem(off, d_be), d_be->page_size);
 	return 0;
 }
 
-int dax_flush_pages(struct hmmap_dev *udev)
+int dax_flush_pages(struct hmmap_dev *dev)
 {
 	unsigned long off;
 	void *cache_address;
 	struct page *page;
+	struct dax_be *d_be;
 
+	if (!dev || !dev->be_priv)
+		return -EINVAL;
+
+	d_be = (struct dax_be *)dev->be_priv;
 	/* Iterate over the list of pages we are asked to flush out */
-	while (!list_empty(&udev->dirty_pages)) {
-		page = list_first_entry(&udev->dirty_pages, struct page, lru);
+	while (!list_empty(&dev->dirty_pages)) {
+		page = list_first_entry(&dev->dirty_pages, struct page, lru);
 		off = page->index;
 		cache_address = (void *)page->private;
 		UDEBUG("Memcpy to dev_off:%lu, cache_addr:%p\n", off,
 		       cache_address);
-		memcpy(dax_mem(off), cache_address, dax_info.page_size);
+		memcpy(dax_mem(off, d_be), cache_address, d_be->page_size);
 		list_del_init(&page->lru);
-		hmmap_release_page(udev, page);
+		hmmap_release_page(dev, page);
 	}
 
 	return 0;
 }
 
-void dax_destroy(void)
+void dax_destroy(struct hmmap_dev *dev)
 {
+	struct dax_be *d_be;
 
+	if (!dev || !dev->be_priv)
+		return;
+
+	d_be = (struct dax_be *)dev->be_priv;
+	kfree(d_be);
 }
 
 static struct hmmap_backend dax_backend = {
