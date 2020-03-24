@@ -78,6 +78,7 @@ struct hmmap_dev {
 	struct list_head dirty_pages;
 	unsigned long delay;
 	struct kobject kobj;
+	struct hmmap_extent* ext_list;
 };
 
 struct hmmap_cache_manager {
@@ -96,7 +97,7 @@ struct hmmap_cache_manager {
 
 struct hmmap_backend {
 	const char *name;
-	int (*init)(unsigned long size, unsigned page_size, 
+	int (*init)(unsigned long size, unsigned page_size, unsigned long off,
 		    struct hmmap_dev *dev);
 	struct page *(*get_page)(unsigned long, struct hmmap_dev *);
 	int (*fill_cache)(void *, unsigned long, struct hmmap_dev *);

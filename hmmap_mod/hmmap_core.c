@@ -35,7 +35,6 @@ static char *caching_policy = "two_level_cache";
 static char *backend_device = "mem_backend";
 static char *backend_path = "";
 static char *pcie_slot = "";
-struct hmmap_extent extent_list;
 struct hmmap_dev *hmmap_devices;
 
 module_param(hmmap_devs, int, 0);
@@ -519,9 +518,10 @@ void hmmap_vm_close(struct vm_area_struct *vma)
 	struct hmmap_dev *udev = (struct hmmap_dev *)vma->vm_private_data;
 	unsigned long dev_offset = vma->vm_pgoff << PAGE_SHIFT;
 	struct hmmap_insert_info insert_info;
+	struct hmmap_extent *ext_list = udev->ext_list;
 
 	UDEBUG("Closing vma %p, with as: %p\n", vma, vma->vm_file->f_mapping);
-	list_for_each_entry(cur_extent, &extent_list.list, list) {
+	list_for_each_entry(cur_extent, &ext_list->list, list) {
 		if (cur_extent->hmmap_off == dev_offset)
 			goto del;
 	}
@@ -558,16 +558,18 @@ struct vm_operations_struct hmmap_vm_ops =
 };
 
 /* Calculate available space left */
-void hmmap_space_allocated(unsigned long *available)
+void hmmap_space_allocated(unsigned long *available,
+			   struct hmmap_extent *ext_list)
 {
 	struct hmmap_extent *cur_extent;
 
-	list_for_each_entry(cur_extent, &extent_list.list, list) {
+	list_for_each_entry(cur_extent, &ext_list->list, list) {
 		*available -= cur_extent->len;
 	}
 }
 
-int hmmap_space_allocate(unsigned long len, unsigned long offset)
+int hmmap_space_allocate(unsigned long len, unsigned long offset,
+			 struct hmmap_extent *ext_list)
 {
 	struct hmmap_extent *extent = kmalloc(sizeof(struct hmmap_extent), 0);
 
@@ -579,7 +581,7 @@ int hmmap_space_allocate(unsigned long len, unsigned long offset)
 	INIT_LIST_HEAD(&extent->list);
 	extent->len = len;
 	extent->hmmap_off = offset;
-	list_add(&extent->list, &extent_list.list);
+	list_add(&extent->list, &ext_list->list);
 
 	return 0;
 }
@@ -593,8 +595,8 @@ int hmmap_fop_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct hmmap_dev *udev = (struct hmmap_dev *)filp->private_data;
 	UDEBUG("MMAP on Device File\n");
 	
-	if (!list_empty(&extent_list.list)) {
-		hmmap_space_allocated(&allocatable_size);
+	if (!list_empty(&udev->ext_list->list)) {
+		hmmap_space_allocated(&allocatable_size, udev->ext_list);
 		device_offset = device_size - allocatable_size;
 	}
 	/* We can only expose a max of device_pages
@@ -605,7 +607,7 @@ int hmmap_fop_mmap(struct file *filp, struct vm_area_struct *vma)
 		goto out;
 	}
 
-	hmmap_space_allocate(vsize, device_offset);
+	hmmap_space_allocate(vsize, device_offset, udev->ext_list);
 	vma->vm_ops = &hmmap_vm_ops;
 	vma->vm_flags |= VM_SHARED | VM_MIXEDMAP;
 	vma->vm_private_data = udev;
@@ -712,6 +714,15 @@ static int __init hmmap_module_init(void)
 	for (i = 0; i < hmmap_devs; ++i) {
 		/* Create this before initializing the cache and backend */
 		/* Hang module sysfs entries off the hmmap entries */
+		hmmap_dev->ext_list = kzalloc(sizeof(struct hmmap_extent),
+					      GFP_KERNEL);
+		if (!hmmap_dev->ext_list) {
+			UINFO("HMMAP DEV:%d extent list alloc fails\n", i);
+			ret = -ENOMEM;
+			goto dev_cleanup;
+		}
+
+		INIT_LIST_HEAD(&hmmap_dev->ext_list->list);
 		kobject_init(&hmmap_dev->kobj, &hdev_ktype);
 		ret = kobject_add(&hmmap_dev->kobj, kernel_kobj, "%s_%d",
 				  "hmmap", i);
@@ -750,7 +761,7 @@ static int __init hmmap_module_init(void)
 		}
 
 		ret = hmmap_dev->backend->init(device_size, PAGE_SIZE,
-					       hmmap_dev);
+					       device_size * i, hmmap_dev);
 		if (ret)
 			goto dev_cleanup;
 
@@ -765,7 +776,6 @@ static int __init hmmap_module_init(void)
 		hmmap_dev++; /* Move onto the next device in the list */
 	}
 
-	INIT_LIST_HEAD(&extent_list.list);	
 	UINFO("INIT SUCCESS\n");
 	UINFO("Device Size:%lu Pages: %u, Cache Size:%lu Pages:%u\n",
 	       device_size,device_pages,cache_size,cache_pages);
@@ -777,6 +787,7 @@ dev_cleanup:
 		hmmap_dev->backend->destroy(hmmap_dev);
 		hmmap_dev->cache_manager->destroy(hmmap_dev);
 		kobject_del(&hmmap_dev->kobj);
+		kfree(hmmap_dev->ext_list);
 		hmmap_dev--;
 		i--;
 	}
