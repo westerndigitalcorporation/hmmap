@@ -31,6 +31,7 @@ void hmmap_put_bdev(struct block_device *bdev);
 int hmmap_block_submit_bio(void *cache_address, unsigned long offset, int op,
 			   struct hmmap_block_complete_private *done,
 			   bool poll, struct block_device *bdev);
-int hmmap_block_flush_pages(struct hmmap_dev *udev, struct block_device *bdev);
+int hmmap_block_flush_pages(struct hmmap_dev *udev, struct block_device *bdev,
+			    unsigned long b_off);
 
 #endif

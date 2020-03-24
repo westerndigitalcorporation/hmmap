@@ -126,7 +126,8 @@ int hmmap_set_bdev(struct hmmap_dev *dev, struct block_device **bdev)
 }
 EXPORT_SYMBOL(hmmap_set_bdev);
 
-int hmmap_block_flush_pages(struct hmmap_dev *udev, struct block_device *bdev)
+int hmmap_block_flush_pages(struct hmmap_dev *udev, struct block_device *bdev,
+			    unsigned long b_off)
 {
 	unsigned long off;
 	void *cache_address;
@@ -151,7 +152,7 @@ int hmmap_block_flush_pages(struct hmmap_dev *udev, struct block_device *bdev)
 	/* Iterate over the list of pages we are asked to flush out */
 	while (!list_empty(&udev->dirty_pages)) {
 		page = list_first_entry(&udev->dirty_pages, struct page, lru);
-		off = page->index;
+		off = page->index + b_off;
 		cache_address = (void *)page->private;
 		UDEBUG("Flushing page with index %lu\n", off);
 		atomic_inc(&(cc->waiters));
