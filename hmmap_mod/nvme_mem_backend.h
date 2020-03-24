@@ -25,6 +25,7 @@ struct nvme_mem_be {
 	u32 page_size;
 	struct block_device *bdev;
 	struct hmmap_pcie_info info;
+	unsigned long off;
 };
 
 #endif

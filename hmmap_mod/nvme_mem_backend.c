@@ -17,7 +17,12 @@
 #include "hmmap.h"
 #include "hmmap_block.h"
 
-int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
+/* TODO: This has to be tested and updated, because the offset does not make
+ * sense as written. I need to init the whole p2p memory and have off chunks
+ * to the individual devices. Not sure this is possible given the current
+ * p2p api.
+ */
+int hmmap_nvme_mem_init(unsigned long size, u32 page_size, unsigned long off,
 			struct hmmap_dev *dev)
 {
 	int ret = 0;
@@ -38,7 +43,7 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 	if (ret)
 		goto out_release_blkdev;
 
-	nm_be->mem = ioremap_cache(pcie_info->res->start, res_size);
+	nm_be->mem = ioremap_cache(pcie_info->res->start + off, size);
 	if (!nm_be->mem) {
 		UINFO("ERROR: NVME MEM BACKEND IOREMAP_WC\n");
 		ret = -ENXIO;
@@ -62,6 +67,7 @@ int hmmap_nvme_mem_init(unsigned long size, u32 page_size,
 	nm_be->size = res_size;
 	nm_be->page_size = page_size;
 	nm_be->dev = dev;
+	nm_be->off = off;
 	dev->be_priv = (void *)nm_be;
 	goto out;
 
@@ -118,7 +124,7 @@ int hmmap_nvme_mem_flush_pages(struct hmmap_dev *dev)
 
 	nm_be = (struct nvme_mem_be *)dev->be_priv;
 
-	return hmmap_block_flush_pages(dev, nm_be->bdev);
+	return hmmap_block_flush_pages(dev, nm_be->bdev, nm_be->off);
 }
 
 void hmmap_nvme_mem_destroy(struct hmmap_dev *dev)
