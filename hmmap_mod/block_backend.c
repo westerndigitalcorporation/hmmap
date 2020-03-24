@@ -15,7 +15,8 @@
 #include "hmmap.h"
 #include "hmmap_block.h"
 
-int hmmap_block_init(unsigned long size, u32 page_size, struct hmmap_dev *dev)
+int hmmap_block_init(unsigned long size, u32 page_size, unsigned long off,
+		     struct hmmap_dev *dev)
 {
 	struct block_be_info *binfo;
 	int ret = 0;
@@ -27,6 +28,7 @@ int hmmap_block_init(unsigned long size, u32 page_size, struct hmmap_dev *dev)
 	binfo->size = size;
 	binfo->page_size = page_size;
 	binfo->dev = dev;
+	binfo->off = off;
 
 	ret = hmmap_set_bdev(dev, &binfo->bdev);
 	if (ret)
@@ -51,8 +53,8 @@ int hmmap_block_fill_cache(void *cache_address, unsigned long offset,
 		return -EINVAL;
 
 	binfo = (struct block_be_info *)dev->be_priv;
-	return hmmap_block_submit_bio(cache_address, offset, REQ_OP_READ, NULL,
-				      true, binfo->bdev);
+	return hmmap_block_submit_bio(cache_address, offset + binfo->off,
+				      REQ_OP_READ, NULL, true, binfo->bdev);
 }
 
 int hmmap_block_be_flush_pages(struct hmmap_dev *dev)
@@ -62,7 +64,7 @@ int hmmap_block_be_flush_pages(struct hmmap_dev *dev)
 		return -EINVAL;
 
 	binfo = (struct block_be_info *)dev->be_priv;
-	return hmmap_block_flush_pages(dev, binfo->bdev);
+	return hmmap_block_flush_pages(dev, binfo->bdev, binfo->off);
 }
 
 void hmmap_block_destroy(struct hmmap_dev *dev)

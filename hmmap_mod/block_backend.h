@@ -18,6 +18,7 @@ struct block_be_info {
 	void *data_buffer;
 	struct hmmap_dev *dev;
 	unsigned long size;
+	unsigned long off;
 	u32 page_size;
 	struct block_device *bdev;
 };
