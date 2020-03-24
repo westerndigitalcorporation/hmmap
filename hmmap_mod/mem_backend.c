@@ -16,7 +16,7 @@
 #include "mem_backend.h"
 #include "hmmap.h"
 
-int mem_backend_init(unsigned long size, unsigned page_size,
+int mem_backend_init(unsigned long size, unsigned page_size, unsigned long off,
 		     struct hmmap_dev *dev)
 {
 	struct mem_be_info *minfo = kzalloc(sizeof(struct mem_be_info),
