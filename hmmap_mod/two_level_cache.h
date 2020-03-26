@@ -28,6 +28,7 @@ struct two_level_data {
 	spinlock_t c_lock;
 	struct page **evict_list;
 	unsigned int evict_list_size;
+	struct kobject kobj;
 };
 
 enum two_level_list_type {

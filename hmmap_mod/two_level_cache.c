@@ -12,6 +12,7 @@
 #include <asm/cacheflush.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/kobject.h>
 
 #include "two_level_cache.h"
 #include "hmmap.h"
@@ -158,6 +159,9 @@ static ssize_t two_level_evict_list_show(struct two_level_data *tdata,
 
 	for (count = 0; count < tdata->evict_list_size; count++) {
 		page = tdata->evict_list[count];
+		if (!page)
+			continue;
+
 		written += snprintf(buf + written, PAGE_SIZE - written,
 				    "page idx:%lu\n", page->index);
 	}
@@ -184,8 +188,48 @@ static struct attribute *two_level_attrs[] = {
 };
 
 static const struct attribute_group two_level_attr_group = {
-	.name = "two_level",
 	.attrs = two_level_attrs,
+};
+
+#define to_tdata(atr) container_of((atr), struct hmmap_two_level_sysfs_entry, attr)
+
+static ssize_t
+tdata_attr_show(struct kobject *kobj, struct attribute *attr, char *page)
+{
+	struct hmmap_two_level_sysfs_entry *entry = to_tdata(attr);
+	struct two_level_data *tl_data = container_of(kobj,
+						      struct two_level_data,
+						      kobj);
+
+	if (!entry || !entry->show || !tl_data)
+		return -EIO;
+
+	return entry->show(tl_data, page);
+}
+
+static ssize_t
+tdata_attr_store(struct kobject *kobj, struct attribute *attr,
+		 const char *page, size_t length)
+{
+	struct hmmap_two_level_sysfs_entry *entry = to_tdata(attr);
+	struct two_level_data *tl_data = container_of(kobj,
+						      struct two_level_data,
+						      kobj);
+
+	if (!entry || !entry->store || !tl_data)
+		return -EIO;
+
+	return entry->store(tl_data, page, length);
+}
+
+static const struct sysfs_ops tdata_sysfs_ops = {
+	.show = tdata_attr_show,
+	.store = tdata_attr_store,
+};
+
+struct kobj_type tdata_ktype = {
+	.sysfs_ops	= &tdata_sysfs_ops,
+	.release	= NULL,
 };
 
 /* Write back cache data and clear management lists */
@@ -381,6 +425,7 @@ int two_level_init(unsigned long size, unsigned page_size,
 	INIT_LIST_HEAD(&tl_data->inactive);
 	INIT_LIST_HEAD(&tl_data->free);
 	spin_lock_init(&tl_data->c_lock);
+	kobject_init(&tl_data->kobj, &tdata_ktype);
 
 	/* Vzalloc the cache to guarantee that the page will exist */
 	tl_data->cache = vzalloc(size);
@@ -390,7 +435,7 @@ int two_level_init(unsigned long size, unsigned page_size,
 		goto out_free_data;
 	}
 
-	tl_data->evict_list = kmalloc(PAGES_TO_CLEAR * sizeof(struct page *),
+	tl_data->evict_list = kzalloc(PAGES_TO_CLEAR * sizeof(struct page *),
 				      GFP_KERNEL);
 	if (!tl_data->evict_list) {
 		UINFO("TWO LEVEL EVICTION LIST FAILS\n");
@@ -415,7 +460,14 @@ int two_level_init(unsigned long size, unsigned page_size,
 		cache_addr += PAGE_SIZE;
 	}
 
-	ret = sysfs_create_group(&dev->kobj, &two_level_attr_group);
+	ret = kobject_add(&tl_data->kobj, &dev->kobj, "%s", "two_level");
+	if (ret) {
+		UINFO("TWO LEVEL CACHE KOBJ ADD FAILS\n");
+		ret = -EINVAL;
+		goto out_free_list;
+	}
+
+	ret = sysfs_create_group(&tl_data->kobj, &two_level_attr_group);
 	if (ret) {
 		UINFO("TWO LEVEL CACHE INIT SYSFS CREATE GROUP FAILS\n");
 		ret = -EINVAL;
@@ -663,7 +715,7 @@ void two_level_destroy(struct hmmap_dev *dev)
 	vfree(tl_data->cache);
 	kfree(tl_data->evict_list);
 	kfree(tl_data);
-	sysfs_remove_group(&dev->kobj, &two_level_attr_group);
+	kobject_del(&tl_data->kobj);
 }
 
 void two_level_release(struct page *page, struct hmmap_dev *dev)
