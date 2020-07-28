@@ -104,7 +104,7 @@ struct page *dax_get_page(unsigned long offset, struct hmmap_dev *dev)
 
 	d_be = (struct dax_be *)dev->be_priv;
 	res = &d_be->dev_dax->region->res;
-	phys = res->start + offset;
+	phys = virt_to_phys(d_be->mem) + offset;
 	phys_pfn_t = phys_to_pfn_t(phys, d_be->dev_dax->region->pfn_flags);
 	return pfn_t_to_page(phys_pfn_t);
 }
