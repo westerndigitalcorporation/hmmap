@@ -783,11 +783,17 @@ static int __init hmmap_module_init(void)
 
 /* Cleanup all that we created */
 dev_cleanup:
-	while (i) {
-		hmmap_dev->backend->destroy(hmmap_dev);
-		hmmap_dev->cache_manager->destroy(hmmap_dev);
+	while (i >= 0) {
+		if (hmmap_dev->backend)
+			hmmap_dev->backend->destroy(hmmap_dev);
+
+		if (hmmap_dev->cache_manager)
+			hmmap_dev->cache_manager->destroy(hmmap_dev);
+
 		kobject_del(&hmmap_dev->kobj);
-		kfree(hmmap_dev->ext_list);
+		if (hmmap_dev->ext_list)
+			kfree(hmmap_dev->ext_list);
+
 		hmmap_dev--;
 		i--;
 	}
