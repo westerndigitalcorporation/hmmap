@@ -549,14 +549,12 @@ int two_level_evict_items(struct hmmap_insert_info *info,
 	info->out_pages = tl_data->evict_list;
 
 	while (info->num_pages < tl_data->evict_list_size) {
-		UDEBUG("Page: %p, before call to evict item inactive, false\n",
-		       page);
+		UDEBUG("Page: %p, before call to evict item inactive\n", page);
 		UDEBUG("NUM pages %u : Out pages: %p\n", info->num_pages,
 		       info->out_pages);
-		page = two_level_find_evict_item(&tl_data->inactive, false,
+		page = two_level_find_evict_item(&tl_data->inactive, true,
 						 tl_data);
-		UDEBUG("Page: %p, after call to evict item inactive, false\n",
-		       page);
+		UDEBUG("Page: %p, after call to evict item inactive\n", page);
 		if (page) {
 			tl_data->inactive_size--;
 			two_level_insert_info_add_page(info, page);
@@ -564,7 +562,7 @@ int two_level_evict_items(struct hmmap_insert_info *info,
 		}
 	
 		UDEBUG("Cur before call to evict active, false %p\n", page);
-		page = two_level_find_evict_item(&tl_data->active, false,
+		page = two_level_find_evict_item(&tl_data->active, true,
 						 tl_data);
 		UDEBUG("Cur after call to evict_item_active_false %p\n", page);
 		if (page) {
@@ -573,39 +571,9 @@ int two_level_evict_items(struct hmmap_insert_info *info,
 			continue;
 		}
 
-		UDEBUG("Cur bef call to evict item inactive, true %p\n", page);
-		page = two_level_find_evict_item(&tl_data->inactive, true,
-						 tl_data);
-		UDEBUG("Cur aft call to evict item inactive, true %p\n", page);
-		if (page) {
-			tl_data->inactive_size--;
-			two_level_insert_info_add_page(info, page);
-			continue;
-		}
-
-		UDEBUG("Cur before call to evict item active, true %p\n", page);
-		page = two_level_find_evict_item(&tl_data->active, true,
-						 tl_data);
-		UDEBUG("Cur after call to evict item active, true %p\n", page);
-		if (page) {
-			tl_data->active_size--;
-			two_level_insert_info_add_page(info, page);
-			continue;
-		} else {
-			/* No more pages left to evict */
-			goto out_cleanup;
-		}
+		BUG_ON(!page);
 	}
 	
-	/* Success skip over cleanup code */
-	goto out;
-
-out_cleanup:
-	UINFO("TWO LEVEL EVICT PAGE FINDS NO CANDIDATE\n");
-	info->out_pages = NULL;
-	info->num_pages = 0;
-	ret = -EINVAL;
-out:
 	return ret;
 
 }
